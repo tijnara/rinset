@@ -2,16 +2,23 @@
 
 import { useState, useEffect } from 'react';
 import { CatalogItem, PricingType } from '@/types/database';
-import { X, Check } from 'lucide-react';
+import { X, Check, Trash2 } from 'lucide-react';
 
 interface CatalogItemModalProps {
     item: CatalogItem | null;
     isOpen: boolean;
     onClose: () => void;
     onSave: (itemData: Partial<CatalogItem>) => Promise<void>;
+    onDelete?: (id: string) => Promise<void>;
 }
 
-export function CatalogItemModal({ item, isOpen, onClose, onSave }: CatalogItemModalProps) {
+export function CatalogItemModal({
+                                     item,
+                                     isOpen,
+                                     onClose,
+                                     onSave,
+                                     onDelete,
+                                 }: CatalogItemModalProps) {
     const [name, setName] = useState('');
     const [category, setCategory] = useState('Services');
     const [pricingType, setPricingType] = useState<PricingType>('per_kilo');
@@ -53,6 +60,16 @@ export function CatalogItemModal({ item, isOpen, onClose, onSave }: CatalogItemM
         });
         setIsSubmitting(false);
         onClose();
+    };
+
+    const handleDelete = async () => {
+        if (!item?.id || !onDelete) return;
+        if (confirm(`Are you sure you want to delete "${item.name}"?`)) {
+            setIsSubmitting(true);
+            await onDelete(item.id);
+            setIsSubmitting(false);
+            onClose();
+        }
     };
 
     return (
@@ -137,14 +154,28 @@ export function CatalogItemModal({ item, isOpen, onClose, onSave }: CatalogItemM
                         )}
                     </div>
 
-                    <button
-                        type="submit"
-                        disabled={isSubmitting}
-                        className="w-full h-12 mt-4 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 shadow transition"
-                    >
-                        <Check className="w-4 h-4 stroke-[2.5]" />
-                        <span>Save Configuration</span>
-                    </button>
+                    <div className="flex gap-2 pt-2">
+                        {item && onDelete && (
+                            <button
+                                type="button"
+                                onClick={handleDelete}
+                                disabled={isSubmitting}
+                                className="px-4 h-12 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 transition"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                                <span>Delete</span>
+                            </button>
+                        )}
+
+                        <button
+                            type="submit"
+                            disabled={isSubmitting}
+                            className="flex-1 h-12 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 shadow transition"
+                        >
+                            <Check className="w-4 h-4 stroke-[2.5]" />
+                            <span>Save Configuration</span>
+                        </button>
+                    </div>
                 </form>
             </div>
         </div>

@@ -35,15 +35,18 @@ export function useCatalogManager() {
 
     const saveItem = async (item: Partial<CatalogItem>) => {
         if (item.id) {
-            // Update existing item
             await supabase.from('catalog_items').update(item).eq('id', item.id);
         } else {
-            // Insert new item
             await supabase.from('catalog_items').insert({
                 ...item,
                 store_id: storeId,
             });
         }
+        fetchItems();
+    };
+
+    const deleteItem = async (id: string) => {
+        await supabase.from('catalog_items').delete().eq('id', id);
         fetchItems();
     };
 
@@ -59,6 +62,7 @@ export function useCatalogManager() {
         storeName,
         isLoading,
         saveItem,
+        deleteItem,
         toggleActiveStatus,
         refreshItems: fetchItems,
     };

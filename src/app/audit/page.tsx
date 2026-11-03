@@ -1,5 +1,6 @@
 import { Suspense } from 'react';
 import { AuditView } from '@/features/audit';
+import { RoleGuard } from '@/features/auth';
 
 export default function AuditPage() {
     return (
@@ -10,7 +11,13 @@ export default function AuditPage() {
                 </div>
             }
         >
-            <AuditView />
+            <RoleGuard
+                allowedRole="owner"
+                fallbackTitle="Owner PIN Required"
+                fallbackSubtitle="Z-Reading and Daily Cash Audit are restricted to Store Owners."
+            >
+                <AuditView />
+            </RoleGuard>
         </Suspense>
     );
 }
