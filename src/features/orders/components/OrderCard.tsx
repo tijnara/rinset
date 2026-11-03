@@ -2,14 +2,19 @@
 
 import { Order, OrderStatus } from '@/types/database';
 import { formatPHP } from '@/lib/formatters';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, DollarSign, AlertCircle } from 'lucide-react';
 
 interface OrderCardProps {
     order: Order;
     onAdvance: (orderId: string, nextStatus: OrderStatus) => void;
+    onSettle: (order: Order) => void;
 }
 
-export function OrderCard({ order, onAdvance }: OrderCardProps) {
+export function OrderCard({ order, onAdvance, onSettle }: OrderCardProps) {
+    const isReady = order.status === 'ready_for_pickup';
+    const isClaimed = order.status === 'claimed';
+    const isUnpaid = order.payment_status !== 'paid';
+
     const getNextTransition = (current: OrderStatus): { next: OrderStatus; label: string } | null => {
         switch (current) {
             case 'received':
@@ -28,7 +33,13 @@ export function OrderCard({ order, onAdvance }: OrderCardProps) {
     const transition = getNextTransition(order.status);
 
     return (
-        <div className="bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-xl p-3.5 shadow-sm space-y-2.5 transition">
+        <div
+            className={`border rounded-xl p-3.5 shadow-sm space-y-2.5 transition ${
+                isClaimed && isUnpaid
+                    ? 'bg-rose-950/20 border-rose-900/50'
+                    : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+            }`}
+        >
             {/* Basket Tag & Payment Badge */}
             <div className="flex justify-between items-start">
                 <div>
@@ -50,7 +61,7 @@ export function OrderCard({ order, onAdvance }: OrderCardProps) {
         </span>
             </div>
 
-            {/* Customer Info & Weight */}
+            {/* Customer Info & Total */}
             <div className="text-xs text-slate-300">
                 <p className="font-medium truncate">{order.customer?.full_name || 'Walk-in'}</p>
                 <div className="text-[11px] text-slate-400 flex justify-between items-center mt-1">
@@ -61,14 +72,45 @@ export function OrderCard({ order, onAdvance }: OrderCardProps) {
                 </div>
             </div>
 
-            {/* Action Advance Button */}
+            {/* 1. Case: Unpaid order already inside CLAIMED (e.g. B-811) */}
+            {isClaimed && isUnpaid && (
+                <button
+                    onClick={() => onSettle(order)}
+                    className="w-full py-2 bg-rose-500/15 hover:bg-rose-500/25 active:bg-rose-600 text-rose-300 rounded-lg text-xs font-bold border border-rose-500/30 flex items-center justify-center space-x-1.5 transition"
+                >
+                    <DollarSign className="w-3.5 h-3.5" />
+                    <span>Collect Debt ({formatPHP(order.net_payable)})</span>
+                </button>
+            )}
+
+            {/* 2. Case: Normal transitions in Received, Washing, Drying, Ready */}
             {transition && (
                 <button
-                    onClick={() => onAdvance(order.id, transition.next)}
-                    className="w-full py-2 bg-slate-900 hover:bg-slate-800 active:bg-sky-600 active:text-slate-950 text-slate-300 rounded-lg text-xs font-bold border border-slate-800 flex items-center justify-center space-x-1.5 transition"
+                    onClick={() => {
+                        // Guard: If Ready for Claim and Unpaid, force payment settlement first
+                        if (isReady && isUnpaid) {
+                            onSettle(order);
+                        } else {
+                            onAdvance(order.id, transition.next);
+                        }
+                    }}
+                    className={`w-full py-2 rounded-lg text-xs font-bold border flex items-center justify-center space-x-1.5 transition ${
+                        isReady && isUnpaid
+                            ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/30'
+                            : 'bg-slate-900 hover:bg-slate-800 active:bg-sky-600 active:text-slate-950 text-slate-300 border-slate-800'
+                    }`}
                 >
-                    <span>{transition.label}</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
+                    {isReady && isUnpaid ? (
+                        <>
+                            <DollarSign className="w-3.5 h-3.5" />
+                            <span>Settle & Claim</span>
+                        </>
+                    ) : (
+                        <>
+                            <span>{transition.label}</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                        </>
+                    )}
                 </button>
             )}
         </div>

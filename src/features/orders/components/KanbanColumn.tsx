@@ -11,6 +11,7 @@ interface KanbanColumnProps {
     colorClass: string;
     orders: Order[];
     onAdvance: (orderId: string, nextStatus: OrderStatus) => void;
+    onSettle: (order: Order) => void;
 }
 
 export function KanbanColumn({
@@ -19,10 +20,10 @@ export function KanbanColumn({
                                  colorClass,
                                  orders,
                                  onAdvance,
+                                 onSettle,
                              }: KanbanColumnProps) {
     return (
         <div className="w-80 flex-shrink-0 bg-slate-900/60 border border-slate-800 rounded-2xl flex flex-col max-h-[calc(100vh-8.5rem)]">
-            {/* Column Lane Header */}
             <div className="p-3.5 border-b border-slate-800 flex justify-between items-center bg-slate-900/80 rounded-t-2xl">
                 <div className="flex items-center space-x-2">
                     <Icon className={`w-4 h-4 ${colorClass}`} />
@@ -35,7 +36,6 @@ export function KanbanColumn({
         </span>
             </div>
 
-            {/* Cards Scrollable Stream */}
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
                 {orders.length === 0 ? (
                     <div className="py-8 text-center text-xs text-slate-600">
@@ -43,7 +43,12 @@ export function KanbanColumn({
                     </div>
                 ) : (
                     orders.map((order) => (
-                        <OrderCard key={order.id} order={order} onAdvance={onAdvance} />
+                        <OrderCard
+                            key={order.id}
+                            order={order}
+                            onAdvance={onAdvance}
+                            onSettle={onSettle}
+                        />
                     ))
                 )}
             </div>
