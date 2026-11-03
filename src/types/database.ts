@@ -45,30 +45,37 @@ export interface CatalogItem {
     created_at: string;
 }
 
+export interface OrderBasket {
+    id: string;
+    order_id: string;
+    basket_tag: string;
+    weight_kg: number;
+    status: OrderStatus;
+    assigned_machine?: string | null;
+    created_at: string;
+    updated_at?: string;
+    order?: Order;
+}
+
 export interface Order {
     id: string;
     store_id: string;
-    order_number: string;
     customer_id: string | null;
+    order_number: string;
     basket_tag: string;
     status: OrderStatus;
+    payment_status: PaymentStatus;
     total_weight_kg: number;
     subtotal: number;
-    discount_type: 'percentage' | 'fixed' | 'none';
-    discount_value: number;
     discount_amount: number;
-    rush_fee: number;
-    delivery_fee: number;
     net_payable: number;
-    payment_status: PaymentStatus;
     total_paid: number;
-    notes: string | null;
-    ready_at: string | null;
-    claimed_at: string | null;
+    assigned_machine?: string | null;
     created_at: string;
-    // Joined relation fields:
+    claimed_at: string | null;
     customer?: Customer;
     items?: OrderItem[];
+    baskets?: OrderBasket[];
 }
 
 export interface OrderItem {

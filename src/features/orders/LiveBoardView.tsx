@@ -1,11 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { Order, OrderStatus } from '@/types/database';
+import { OrderBasket, Order, OrderStatus } from '@/types/database';
 import { useLiveOrders } from '@/features/orders/hooks/useLiveOrders';
 import { KanbanColumn } from '@/features/orders/components/KanbanColumn';
 import { SettleClaimModal } from '@/features/orders/components/SettleClaimModal';
 import { QrScannerModal } from '@/features/orders/components/QrScannerModal';
+import { MachineStatusOverview } from '@/features/orders/components/MachineStatusOverview';
+import { AssignMachineModal } from '@/features/orders/components/AssignMachineModal';
 import { Navbar } from '@/components/layout/Navbar';
 import {
     Clock,
@@ -34,31 +36,38 @@ const LANES: LaneConfig[] = [
 ];
 
 export function LiveBoardView() {
-    const { orders, storeName, updateOrderStatus, refreshOrders } = useLiveOrders();
+    const { baskets, storeName, updateBasketStatus, refreshOrders } = useLiveOrders();
     const [searchQuery, setSearchQuery] = useState<string>('');
     const [orderToSettle, setOrderToSettle] = useState<Order | null>(null);
     const [isScannerOpen, setIsScannerOpen] = useState<boolean>(false);
 
-    const filteredOrders = orders.filter((o) => {
+    const [assignTarget, setAssignTarget] = useState<{
+        basket: OrderBasket;
+        targetStatus: OrderStatus;
+    } | null>(null);
+
+    const filteredBaskets = baskets.filter((b) => {
         const q = searchQuery.toLowerCase();
-        const matchesTag = o.basket_tag.toLowerCase().includes(q);
-        const matchesNum = o.order_number.toLowerCase().includes(q);
-        const matchesCustomer = o.customer?.full_name?.toLowerCase().includes(q) ?? false;
-        return matchesTag || matchesNum || matchesCustomer;
+        const matchesTag = b.basket_tag.toLowerCase().includes(q);
+        const matchesNum = b.order?.order_number.toLowerCase().includes(q) ?? false;
+        const matchesCustomer = b.order?.customer?.full_name?.toLowerCase().includes(q) ?? false;
+        const matchesMachine = b.assigned_machine?.toLowerCase().includes(q) ?? false;
+        return matchesTag || matchesNum || matchesCustomer || matchesMachine;
     });
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
             <Navbar storeName={storeName} />
 
-            {/* Filter, Search & Camera Scanner Bar */}
+            <MachineStatusOverview baskets={baskets} />
+
             <div className="p-4 border-b border-slate-800 bg-slate-900/40 flex flex-col sm:flex-row justify-between items-center gap-3">
                 <div className="flex w-full sm:w-80 gap-2">
                     <div className="relative flex-1">
                         <Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
                         <input
                             type="text"
-                            placeholder="Search basket tag, order #, or customer..."
+                            placeholder="Search basket (B-01A), order #, machine..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:border-sky-500 focus:outline-none"
@@ -75,15 +84,14 @@ export function LiveBoardView() {
 
                 <div className="text-xs text-slate-400 flex items-center space-x-4">
           <span>
-            Active Baskets: <strong className="text-white">{orders.filter(o => o.status !== 'claimed' && o.status !== 'cancelled').length}</strong>
+            Active Baskets: <strong className="text-white">{baskets.filter(b => b.status !== 'claimed').length}</strong>
           </span>
                     <span>
-            Ready for Pickup: <strong className="text-emerald-400">{orders.filter(o => o.status === 'ready_for_pickup').length}</strong>
+            Ready for Pickup: <strong className="text-emerald-400">{baskets.filter(b => b.status === 'ready_for_pickup').length}</strong>
           </span>
                 </div>
             </div>
 
-            {/* Realtime Kanban Columns Grid */}
             <div className="flex-1 overflow-x-auto p-4 flex space-x-4">
                 {LANES.map((lane) => (
                     <KanbanColumn
@@ -92,14 +100,27 @@ export function LiveBoardView() {
                         label={lane.label}
                         icon={lane.icon}
                         colorClass={lane.color}
-                        orders={filteredOrders.filter((o) => o.status === lane.key)}
-                        onAdvance={updateOrderStatus}
+                        baskets={filteredBaskets.filter((b) => b.status === lane.key)}
+                        onAdvance={updateBasketStatus}
+                        onRequestAssign={(basket, targetStatus) =>
+                            setAssignTarget({ basket, targetStatus })
+                        }
                         onSettle={(order) => setOrderToSettle(order)}
                     />
                 ))}
             </div>
 
-            {/* Settle & Claim Payment Modal */}
+            <AssignMachineModal
+                basket={assignTarget?.basket || null}
+                targetStatus={assignTarget?.targetStatus || null}
+                activeBaskets={baskets}
+                isOpen={Boolean(assignTarget)}
+                onClose={() => setAssignTarget(null)}
+                onConfirm={(basketId, orderId, nextStatus, machineId) => {
+                    updateBasketStatus(basketId, orderId, nextStatus, machineId);
+                }}
+            />
+
             <SettleClaimModal
                 order={orderToSettle}
                 onClose={() => setOrderToSettle(null)}
@@ -108,7 +129,6 @@ export function LiveBoardView() {
                 }}
             />
 
-            {/* Camera QR Tag Scanner Modal */}
             <QrScannerModal
                 isOpen={isScannerOpen}
                 onClose={() => setIsScannerOpen(false)}

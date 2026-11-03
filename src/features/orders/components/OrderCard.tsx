@@ -1,19 +1,26 @@
 'use client';
 
-import { Order, OrderStatus } from '@/types/database';
+import { OrderBasket, Order, OrderStatus } from '@/types/database';
 import { formatPHP } from '@/lib/formatters';
-import { ArrowRight, DollarSign, AlertCircle } from 'lucide-react';
+import { ArrowRight, DollarSign, Sparkles, Wind } from 'lucide-react';
 
 interface OrderCardProps {
-    order: Order;
-    onAdvance: (orderId: string, nextStatus: OrderStatus) => void;
+    basket: OrderBasket;
+    onAdvance: (basketId: string, orderId: string, nextStatus: OrderStatus, machineSlot?: string | null) => void;
+    onRequestAssign: (basket: OrderBasket, targetStatus: OrderStatus) => void;
     onSettle: (order: Order) => void;
 }
 
-export function OrderCard({ order, onAdvance, onSettle }: OrderCardProps) {
-    const isReady = order.status === 'ready_for_pickup';
-    const isClaimed = order.status === 'claimed';
-    const isUnpaid = order.payment_status !== 'paid';
+export function OrderCard({
+                              basket,
+                              onAdvance,
+                              onRequestAssign,
+                              onSettle,
+                          }: OrderCardProps) {
+    const parentOrder = basket.order;
+    const isReady = basket.status === 'ready_for_pickup';
+    const isClaimed = basket.status === 'claimed';
+    const isUnpaid = parentOrder?.payment_status !== 'paid';
 
     const getNextTransition = (current: OrderStatus): { next: OrderStatus; label: string } | null => {
         switch (current) {
@@ -30,7 +37,23 @@ export function OrderCard({ order, onAdvance, onSettle }: OrderCardProps) {
         }
     };
 
-    const transition = getNextTransition(order.status);
+    const transition = getNextTransition(basket.status);
+
+    const handleActionClick = () => {
+        if (!transition || !parentOrder) return;
+
+        if (isReady && isUnpaid) {
+            onSettle(parentOrder);
+            return;
+        }
+
+        if (transition.next === 'washing' || transition.next === 'drying') {
+            onRequestAssign(basket, transition.next);
+            return;
+        }
+
+        onAdvance(basket.id, basket.order_id, transition.next, null);
+    };
 
     return (
         <div
@@ -40,60 +63,70 @@ export function OrderCard({ order, onAdvance, onSettle }: OrderCardProps) {
                     : 'bg-slate-950 border-slate-800 hover:border-slate-700'
             }`}
         >
-            {/* Basket Tag & Payment Badge */}
             <div className="flex justify-between items-start">
-                <div>
+                <div className="flex items-center space-x-2">
           <span className="px-2 py-0.5 bg-sky-500/10 text-sky-400 font-mono font-black text-sm rounded border border-sky-500/20">
-            {order.basket_tag}
+            {basket.basket_tag}
           </span>
-                    <span className="text-[11px] text-slate-400 font-mono ml-2">
-            #{order.order_number}
+                    <span className="text-[11px] text-slate-400 font-mono">
+            #{parentOrder?.order_number || 'N/A'}
           </span>
                 </div>
+
                 <span
                     className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${
-                        order.payment_status === 'paid'
+                        parentOrder?.payment_status === 'paid'
                             ? 'bg-emerald-500/10 text-emerald-400'
                             : 'bg-amber-500/10 text-amber-400'
                     }`}
                 >
-          {order.payment_status}
+          {parentOrder?.payment_status}
         </span>
             </div>
 
-            {/* Customer Info & Total */}
             <div className="text-xs text-slate-300">
-                <p className="font-medium truncate">{order.customer?.full_name || 'Walk-in'}</p>
+                <p className="font-medium truncate">{parentOrder?.customer?.full_name || 'Walk-in'}</p>
                 <div className="text-[11px] text-slate-400 flex justify-between items-center mt-1">
-                    <span>{order.total_weight_kg > 0 ? `${order.total_weight_kg} kg` : 'Bulky/Retail'}</span>
+                    <span>{basket.weight_kg > 0 ? `${basket.weight_kg} kg drum` : 'Retail/Load'}</span>
                     <span className="font-mono text-white font-semibold">
-            {formatPHP(order.net_payable)}
+            {parentOrder ? formatPHP(parentOrder.net_payable) : ''}
           </span>
                 </div>
             </div>
 
-            {/* 1. Case: Unpaid order already inside CLAIMED (e.g. B-811) */}
-            {isClaimed && isUnpaid && (
+            {basket.assigned_machine && (basket.status === 'washing' || basket.status === 'drying') && (
+                <div
+                    className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold flex items-center justify-between border ${
+                        basket.status === 'washing'
+                            ? 'bg-sky-500/10 border-sky-500/30 text-sky-300'
+                            : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300'
+                    }`}
+                >
+          <span className="flex items-center gap-1.5 text-[11px]">
+            {basket.status === 'washing' ? (
+                <Sparkles className="w-3 h-3 text-sky-400" />
+            ) : (
+                <Wind className="w-3 h-3 text-indigo-400" />
+            )}
+              <span>{basket.status === 'washing' ? 'Drum:' : 'Dryer:'}</span>
+          </span>
+                    <span className="text-white text-xs">{basket.assigned_machine}</span>
+                </div>
+            )}
+
+            {isClaimed && isUnpaid && parentOrder && (
                 <button
-                    onClick={() => onSettle(order)}
+                    onClick={() => onSettle(parentOrder)}
                     className="w-full py-2 bg-rose-500/15 hover:bg-rose-500/25 active:bg-rose-600 text-rose-300 rounded-lg text-xs font-bold border border-rose-500/30 flex items-center justify-center space-x-1.5 transition"
                 >
                     <DollarSign className="w-3.5 h-3.5" />
-                    <span>Collect Debt ({formatPHP(order.net_payable)})</span>
+                    <span>Collect Debt ({formatPHP(parentOrder.net_payable)})</span>
                 </button>
             )}
 
-            {/* 2. Case: Normal transitions in Received, Washing, Drying, Ready */}
             {transition && (
                 <button
-                    onClick={() => {
-                        // Guard: If Ready for Claim and Unpaid, force payment settlement first
-                        if (isReady && isUnpaid) {
-                            onSettle(order);
-                        } else {
-                            onAdvance(order.id, transition.next);
-                        }
-                    }}
+                    onClick={handleActionClick}
                     className={`w-full py-2 rounded-lg text-xs font-bold border flex items-center justify-center space-x-1.5 transition ${
                         isReady && isUnpaid
                             ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/30'

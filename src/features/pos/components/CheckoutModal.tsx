@@ -15,6 +15,9 @@ import {
     Loader2,
     AlertCircle,
     Receipt,
+    Layers,
+    Plus,
+    Minus,
 } from 'lucide-react';
 
 interface CheckoutModalProps {
@@ -23,6 +26,8 @@ interface CheckoutModalProps {
     onClose: () => void;
     onSuccess: (orderNumber: string) => void;
 }
+
+const DRUM_CAPACITY_KG = 8;
 
 export function CheckoutModal({
                                   storeId,
@@ -47,10 +52,18 @@ export function CheckoutModal({
     const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-    // Sync cash tendered when net payable updates
+    // Multi-load split state
+    const recommendedBaskets =
+        breakdown.totalWeightKg > DRUM_CAPACITY_KG
+            ? Math.ceil(breakdown.totalWeightKg / DRUM_CAPACITY_KG)
+            : 1;
+
+    const [basketCount, setBasketCount] = useState<number>(1);
+
     useEffect(() => {
         setCashTendered(breakdown.netPayable);
-    }, [breakdown.netPayable]);
+        setBasketCount(recommendedBaskets);
+    }, [breakdown.netPayable, recommendedBaskets]);
 
     if (!isOpen) return null;
 
@@ -60,8 +73,21 @@ export function CheckoutModal({
         paymentType === 'gcash' ? breakdown.netPayable : 0
     );
 
+    // Compute individual basket weights
+    const baseTag = basketTag.trim() || `B-${Math.floor(100 + Math.random() * 900)}`;
+    const subBaskets = Array.from({ length: basketCount }, (_, index) => {
+        const letter = String.fromCharCode(65 + index); // A, B, C...
+        const weightPerBasket =
+            basketCount === 1
+                ? breakdown.totalWeightKg
+                : Math.round((breakdown.totalWeightKg / basketCount) * 10) / 10;
+        return {
+            tag: basketCount > 1 ? `${baseTag}-${letter}` : baseTag,
+            weightKg: weightPerBasket,
+        };
+    });
+
     const handleCompleteCheckout = async () => {
-        // Validation: Require customer name before receipt generation
         if (!customerName.trim()) {
             setErrorMsg('Customer name is required for receipt and basket tag identification.');
             return;
@@ -72,9 +98,8 @@ export function CheckoutModal({
         const supabase = createClient();
 
         try {
-            // 1. Find or create Customer record
+            // 1. Customer resolution
             let customerId: string | null = null;
-
             if (customerMobile.trim()) {
                 const { data: existingCust } = await supabase
                     .from('customers')
@@ -82,9 +107,7 @@ export function CheckoutModal({
                     .eq('mobile_number', customerMobile.trim())
                     .maybeSingle();
 
-                if (existingCust) {
-                    customerId = existingCust.id;
-                }
+                if (existingCust) customerId = existingCust.id;
             }
 
             if (!customerId) {
@@ -102,19 +125,18 @@ export function CheckoutModal({
                 customerId = newCust.id;
             }
 
-            // 2. Generate random ticket number
+            // 2. Generate Order
             const randomTicketNum = Math.floor(1000 + Math.random() * 9000);
             const orderNumber = `RNS-${randomTicketNum}`;
             const isPaid = paymentType !== 'pay_on_claim';
 
-            // 3. Insert Order
             const { data: orderData, error: orderErr } = await supabase
                 .from('orders')
                 .insert({
                     store_id: storeId,
                     customer_id: customerId,
                     order_number: orderNumber,
-                    basket_tag: basketTag.trim() || `B-${Math.floor(100 + Math.random() * 900)}`,
+                    basket_tag: baseTag,
                     status: 'received',
                     payment_status: isPaid ? 'paid' : 'unpaid',
                     total_weight_kg: breakdown.totalWeightKg,
@@ -128,7 +150,18 @@ export function CheckoutModal({
 
             if (orderErr) throw orderErr;
 
-            // 4. Insert Order Items with item_total
+            // 3. Insert Sub-Baskets into order_baskets
+            const basketsPayload = subBaskets.map((b) => ({
+                order_id: orderData.id,
+                basket_tag: b.tag,
+                weight_kg: b.weightKg,
+                status: 'received',
+            }));
+
+            const { error: basketsErr } = await supabase.from('order_baskets').insert(basketsPayload);
+            if (basketsErr) throw basketsErr;
+
+            // 4. Insert Order Items
             const orderItems = breakdown.items.map((i) => ({
                 order_id: orderData.id,
                 catalog_item_id: i.id,
@@ -143,7 +176,7 @@ export function CheckoutModal({
             const { error: itemsErr } = await supabase.from('order_items').insert(orderItems);
             if (itemsErr) throw itemsErr;
 
-            // 5. Insert Payment Record if paid now
+            // 5. Insert Payment Record
             if (isPaid) {
                 const { error: payErr } = await supabase.from('payments').insert({
                     order_id: orderData.id,
@@ -160,7 +193,15 @@ export function CheckoutModal({
             onSuccess(orderNumber);
             onClose();
         } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : 'Checkout failed';
+            console.error('Checkout error:', err);
+            let msg = 'Checkout failed';
+
+            if (err instanceof Error) {
+                msg = err.message;
+            } else if (typeof err === 'object' && err !== null && 'message' in err) {
+                msg = String((err as { message: unknown }).message);
+            }
+
             setErrorMsg(msg);
         } finally {
             setIsSubmitting(false);
@@ -170,16 +211,12 @@ export function CheckoutModal({
     return (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-150">
             <div className="w-full sm:max-w-md bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-2xl p-5 shadow-2xl flex flex-col space-y-4 max-h-[92vh] overflow-y-auto">
-                {/* Header */}
                 <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                     <div className="flex items-center space-x-2">
                         <Receipt className="w-5 h-5 text-sky-400" />
                         <h3 className="font-bold text-white text-base">Receipt & Checkout Details</h3>
                     </div>
-                    <button
-                        onClick={onClose}
-                        className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800"
-                    >
+                    <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800">
                         <X className="w-4 h-4" />
                     </button>
                 </div>
@@ -195,11 +232,11 @@ export function CheckoutModal({
             </span>
                     </div>
                     <span className="text-xs font-mono text-slate-400">
-            {breakdown.totalWeightKg > 0 ? `${breakdown.totalWeightKg} kg` : `${breakdown.items.length} items`}
+            {breakdown.totalWeightKg > 0 ? `${breakdown.totalWeightKg} kg total` : `${breakdown.items.length} items`}
           </span>
                 </div>
 
-                {/* Customer Information (Required for Receipt) */}
+                {/* Customer Information */}
                 <div className="space-y-2 bg-slate-950/70 border border-slate-800/80 p-3.5 rounded-2xl">
                     <div className="flex justify-between items-center mb-1">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
@@ -216,6 +253,53 @@ export function CheckoutModal({
                         onNameChange={(name) => setCustomer(name, customerMobile)}
                         onMobileChange={(mobile) => setCustomer(customerName, mobile)}
                     />
+                </div>
+
+                {/* Multi-Load Basket Splitter */}
+                <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-2xl space-y-3">
+                    <div className="flex justify-between items-center">
+                        <div className="flex items-center space-x-1.5 text-xs font-bold text-slate-200">
+                            <Layers className="w-4 h-4 text-sky-400" />
+                            <span>Physical Baskets / Machine Loads</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                            <button
+                                type="button"
+                                onClick={() => setBasketCount((c) => Math.max(1, c - 1))}
+                                className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg flex items-center justify-center transition"
+                            >
+                                <Minus className="w-3.5 h-3.5" />
+                            </button>
+                            <span className="font-mono font-bold text-sm text-white w-4 text-center">
+                {basketCount}
+              </span>
+                            <button
+                                type="button"
+                                onClick={() => setBasketCount((c) => Math.min(6, c + 1))}
+                                className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg flex items-center justify-center transition"
+                            >
+                                <Plus className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
+                    </div>
+
+                    {breakdown.totalWeightKg > DRUM_CAPACITY_KG && (
+                        <p className="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-1 rounded-lg">
+                            Weight ({breakdown.totalWeightKg}kg) exceeds 8kg drum limit. Splitting into {basketCount} physical loads recommended.
+                        </p>
+                    )}
+
+                    {/* Sub-baskets preview tags */}
+                    <div className="flex flex-wrap gap-1.5">
+                        {subBaskets.map((b) => (
+                            <span
+                                key={b.tag}
+                                className="px-2 py-1 bg-slate-900 border border-slate-800 text-[11px] font-mono rounded-lg text-slate-300"
+                            >
+                <strong>{b.tag}</strong> ({b.weightKg} kg)
+              </span>
+                        ))}
+                    </div>
                 </div>
 
                 {/* Payment Method Selector */}
@@ -305,7 +389,6 @@ export function CheckoutModal({
                     </div>
                 )}
 
-                {/* GCash Reference */}
                 {paymentType === 'gcash' && (
                     <div className="space-y-1 bg-slate-950 border border-slate-800 p-3 rounded-xl">
                         <label className="text-xs text-slate-400">GCash Ref No. (optional):</label>
@@ -326,7 +409,6 @@ export function CheckoutModal({
                     </div>
                 )}
 
-                {/* Submit */}
                 <button
                     onClick={handleCompleteCheckout}
                     disabled={
@@ -339,7 +421,7 @@ export function CheckoutModal({
                     {isSubmitting ? (
                         <Loader2 className="w-5 h-5 animate-spin" />
                     ) : (
-                        <span>Confirm & Print Receipt</span>
+                        <span>Confirm & Print Receipt ({basketCount} {basketCount === 1 ? 'Basket' : 'Baskets'})</span>
                     )}
                 </button>
             </div>

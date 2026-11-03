@@ -2,39 +2,44 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Order, OrderStatus } from '@/types/database';
+import { OrderBasket, OrderStatus } from '@/types/database';
 
 export function useLiveOrders() {
-    const [orders, setOrders] = useState<Order[]>([]);
+    const [baskets, setBaskets] = useState<OrderBasket[]>([]);
+    const [storeName, setStoreName] = useState<string>('Rinset Laundry');
     const [isLoading, setIsLoading] = useState<boolean>(true);
-    const [storeName, setStoreName] = useState<string>('Rinset Laundry - Dagupan');
 
     const supabase = createClient();
 
-    const fetchOrders = useCallback(async () => {
+    const fetchBaskets = useCallback(async () => {
+        setIsLoading(true);
+
         const { data: store } = await supabase.from('stores').select('name').limit(1).single();
         if (store) setStoreName(store.name);
 
-        const { data } = await supabase
-            .from('orders')
-            .select('*, customer:customers(*), items:order_items(*)')
+        // Fetch baskets joined with their parent order and customer info
+        const { data, error } = await supabase
+            .from('order_baskets')
+            .select('*, order:orders(*, customer:customers(*))')
             .order('created_at', { ascending: false });
 
-        if (data) setOrders(data as Order[]);
+        if (!error && data) {
+            setBaskets(data as OrderBasket[]);
+        }
         setIsLoading(false);
     }, [supabase]);
 
     useEffect(() => {
-        fetchOrders();
+        fetchBaskets();
 
-        // Listen to real-time order status shifts
+        // Subscribe to changes on order_baskets
         const channel = supabase
-            .channel('live-orders')
+            .channel('realtime_order_baskets')
             .on(
                 'postgres_changes',
-                { event: '*', schema: 'public', table: 'orders' },
+                { event: '*', schema: 'public', table: 'order_baskets' },
                 () => {
-                    fetchOrders();
+                    fetchBaskets();
                 }
             )
             .subscribe();
@@ -42,26 +47,67 @@ export function useLiveOrders() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [fetchOrders, supabase]);
+    }, [fetchBaskets, supabase]);
 
-    const updateOrderStatus = async (orderId: string, nextStatus: OrderStatus) => {
-        const updates: Partial<Order> = { status: nextStatus };
-        if (nextStatus === 'ready_for_pickup') updates.ready_at = new Date().toISOString();
-        if (nextStatus === 'claimed') updates.claimed_at = new Date().toISOString();
+    const updateBasketStatus = async (
+        basketId: string,
+        orderId: string,
+        nextStatus: OrderStatus,
+        machineSlot?: string | null
+    ) => {
+        const updatePayload: { status: OrderStatus; assigned_machine?: string | null } = {
+            status: nextStatus,
+        };
 
-        await supabase.from('orders').update(updates).eq('id', orderId);
+        if (nextStatus === 'ready_for_pickup' || nextStatus === 'claimed') {
+            updatePayload.assigned_machine = null;
+        } else if (machineSlot !== undefined) {
+            updatePayload.assigned_machine = machineSlot;
+        }
 
-        // Optimistic UI update
-        setOrders((prev) =>
-            prev.map((o) => (o.id === orderId ? { ...o, status: nextStatus } : o))
+        // 1. Optimistic UI update
+        setBaskets((prev) =>
+            prev.map((b) => (b.id === basketId ? { ...b, ...updatePayload } : b))
         );
+
+        // 2. Update order_baskets record
+        await supabase.from('order_baskets').update(updatePayload).eq('id', basketId);
+
+        // 3. Keep parent order status synced
+        const { data: siblingBaskets } = await supabase
+            .from('order_baskets')
+            .select('status')
+            .eq('order_id', orderId);
+
+        if (siblingBaskets && siblingBaskets.length > 0) {
+            const allClaimed = siblingBaskets.every((b) => b.status === 'claimed');
+            const allReadyOrClaimed = siblingBaskets.every(
+                (b) => b.status === 'ready_for_pickup' || b.status === 'claimed'
+            );
+            const anyWashingOrDrying = siblingBaskets.some(
+                (b) => b.status === 'washing' || b.status === 'drying'
+            );
+
+            let computedOrderStatus: OrderStatus = 'received';
+            if (allClaimed) {
+                computedOrderStatus = 'claimed';
+            } else if (allReadyOrClaimed) {
+                computedOrderStatus = 'ready_for_pickup';
+            } else if (anyWashingOrDrying) {
+                computedOrderStatus = 'washing';
+            }
+
+            await supabase.from('orders').update({ status: computedOrderStatus }).eq('id', orderId);
+        }
+
+        fetchBaskets();
     };
 
     return {
-        orders,
-        isLoading,
+        baskets,
         storeName,
-        updateOrderStatus,
-        refreshOrders: fetchOrders,
+        isLoading,
+        updateBasketStatus,
+        refreshOrders: fetchBaskets,
     };
 }

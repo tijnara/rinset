@@ -1,6 +1,6 @@
 'use client';
 
-import { Order, OrderStatus } from '@/types/database';
+import { OrderBasket, Order, OrderStatus } from '@/types/database';
 import { OrderCard } from './OrderCard';
 import { LucideIcon } from 'lucide-react';
 
@@ -9,8 +9,9 @@ interface KanbanColumnProps {
     label: string;
     icon: LucideIcon;
     colorClass: string;
-    orders: Order[];
-    onAdvance: (orderId: string, nextStatus: OrderStatus) => void;
+    baskets: OrderBasket[];
+    onAdvance: (basketId: string, orderId: string, nextStatus: OrderStatus, machineSlot?: string | null) => void;
+    onRequestAssign: (basket: OrderBasket, targetStatus: OrderStatus) => void;
     onSettle: (order: Order) => void;
 }
 
@@ -18,12 +19,13 @@ export function KanbanColumn({
                                  label,
                                  icon: Icon,
                                  colorClass,
-                                 orders,
+                                 baskets,
                                  onAdvance,
+                                 onRequestAssign,
                                  onSettle,
                              }: KanbanColumnProps) {
     return (
-        <div className="w-80 flex-shrink-0 bg-slate-900/60 border border-slate-800 rounded-2xl flex flex-col max-h-[calc(100vh-8.5rem)]">
+        <div className="w-80 flex-shrink-0 bg-slate-900/60 border border-slate-800 rounded-2xl flex flex-col max-h-[calc(100vh-12rem)]">
             <div className="p-3.5 border-b border-slate-800 flex justify-between items-center bg-slate-900/80 rounded-t-2xl">
                 <div className="flex items-center space-x-2">
                     <Icon className={`w-4 h-4 ${colorClass}`} />
@@ -32,21 +34,22 @@ export function KanbanColumn({
           </span>
                 </div>
                 <span className="px-2 py-0.5 rounded-full bg-slate-800 text-[11px] font-mono font-bold text-slate-400">
-          {orders.length}
+          {baskets.length}
         </span>
             </div>
 
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
-                {orders.length === 0 ? (
+                {baskets.length === 0 ? (
                     <div className="py-8 text-center text-xs text-slate-600">
                         No baskets in this stage
                     </div>
                 ) : (
-                    orders.map((order) => (
+                    baskets.map((basket) => (
                         <OrderCard
-                            key={order.id}
-                            order={order}
+                            key={basket.id}
+                            basket={basket}
                             onAdvance={onAdvance}
+                            onRequestAssign={onRequestAssign}
                             onSettle={onSettle}
                         />
                     ))
