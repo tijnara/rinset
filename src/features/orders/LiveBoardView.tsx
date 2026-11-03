@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, ComponentType } from 'react';
 import { OrderBasket, Order, OrderStatus } from '@/types/database';
 import { useLiveOrders } from '@/features/orders/hooks/useLiveOrders';
 import { KanbanColumn } from '@/features/orders/components/KanbanColumn';
@@ -9,27 +9,26 @@ import { QrScannerModal } from '@/features/orders/components/QrScannerModal';
 import { MachineStatusOverview } from '@/features/orders/components/MachineStatusOverview';
 import { AssignMachineModal } from '@/features/orders/components/AssignMachineModal';
 import { Navbar } from '@/components/layout/Navbar';
+import { Bubbles } from '@/components/icons/Bubbles';
 import {
     Clock,
-    Sparkles,
     Wind,
     CheckCircle2,
     PackageCheck,
     Search,
     Camera,
-    LucideIcon,
 } from 'lucide-react';
 
 interface LaneConfig {
     key: OrderStatus;
     label: string;
-    icon: LucideIcon;
+    icon: ComponentType<{ className?: string }>;
     color: string;
 }
 
 const LANES: LaneConfig[] = [
     { key: 'received', label: 'Received / Queue', icon: Clock, color: 'text-amber-400 border-amber-500/30' },
-    { key: 'washing', label: 'Washing', icon: Sparkles, color: 'text-sky-400 border-sky-500/30' },
+    { key: 'washing', label: 'Washing', icon: Bubbles, color: 'text-sky-400 border-sky-500/30' },
     { key: 'drying', label: 'Drying', icon: Wind, color: 'text-indigo-400 border-indigo-500/30' },
     { key: 'ready_for_pickup', label: 'Ready for Claim', icon: CheckCircle2, color: 'text-emerald-400 border-emerald-500/30' },
     { key: 'claimed', label: 'Claimed', icon: PackageCheck, color: 'text-slate-500 border-slate-700' },
@@ -56,7 +55,7 @@ export function LiveBoardView() {
     });
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none pb-16 md:pb-0">
             <Navbar storeName={storeName} />
 
             <MachineStatusOverview baskets={baskets} />
@@ -84,10 +83,10 @@ export function LiveBoardView() {
 
                 <div className="text-xs text-slate-400 flex items-center space-x-4">
           <span>
-            Active Baskets: <strong className="text-white">{baskets.filter(b => b.status !== 'claimed').length}</strong>
+            Active Baskets: <strong className="text-white">{baskets.filter((b) => b.status !== 'claimed').length}</strong>
           </span>
                     <span>
-            Ready for Pickup: <strong className="text-emerald-400">{baskets.filter(b => b.status === 'ready_for_pickup').length}</strong>
+            Ready for Pickup: <strong className="text-emerald-400">{baskets.filter((b) => b.status === 'ready_for_pickup').length}</strong>
           </span>
                 </div>
             </div>

@@ -102,3 +102,20 @@ export interface Payment {
     reference_number: string | null;
     created_at: string;
 }
+export type ExpenseCategory =
+    | 'water_refill'
+    | 'packaging'
+    | 'soap_supplies'
+    | 'staff_allowance'
+    | 'maintenance'
+    | 'other';
+
+export interface StoreExpense {
+    id: string;
+    store_id: string;
+    amount: number;
+    category: ExpenseCategory;
+    description: string;
+    recorded_by: string;
+    created_at: string;
+}

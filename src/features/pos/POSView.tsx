@@ -5,14 +5,16 @@ import { createClient } from '@/lib/supabase/client';
 import { CatalogItem, Order } from '@/types/database';
 import { useCatalog } from '@/features/pos/hooks/useCatalog';
 import { useCartStore } from '@/features/pos/store/useCartStore';
+import { useAudit } from '@/features/audit/hooks/useAudit';
 import { CatalogGrid } from '@/features/pos/components/CatalogGrid';
 import { CartSidebar } from '@/features/pos/components/CartSidebar';
 import { WeightModal } from '@/features/pos/components/WeightModal';
 import { CheckoutModal } from '@/features/pos/components/CheckoutModal';
 import { ReceiptModal } from '@/features/pos/components/ReceiptModal';
+import { CashOutModal } from '@/features/audit/components/CashOutModal';
 import { Navbar } from '@/components/layout/Navbar';
 import { formatPHP } from '@/lib/formatters';
-import { ShoppingBag, ChevronUp, CheckCircle2 } from 'lucide-react';
+import { ShoppingBag, ChevronUp, CheckCircle2, MinusCircle } from 'lucide-react';
 
 export function POSView() {
     const {
@@ -26,10 +28,12 @@ export function POSView() {
 
     const { addItem, getBreakdown } = useCartStore();
     const breakdown = getBreakdown();
+    const { logExpense } = useAudit();
 
     const [activeWeightItem, setActiveWeightItem] = useState<CatalogItem | null>(null);
     const [isCheckoutOpen, setIsCheckoutOpen] = useState<boolean>(false);
     const [isMobileCartOpen, setIsMobileCartOpen] = useState<boolean>(false);
+    const [isCashOutOpen, setIsCashOutOpen] = useState<boolean>(false);
     const [completedOrder, setCompletedOrder] = useState<string | null>(null);
     const [lastCreatedOrder, setLastCreatedOrder] = useState<Order | null>(null);
 
@@ -42,18 +46,35 @@ export function POSView() {
     };
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none pb-16 md:pb-0">
             <Navbar storeName={storeName} />
 
             <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-                {/* Catalog Grid */}
-                <CatalogGrid
-                    items={catalog}
-                    categories={categories}
-                    selectedCategory={selectedCategory}
-                    onSelectCategory={(category: string) => setSelectedCategory(category)}
-                    onItemSelect={(item: CatalogItem) => handleItemSelect(item)}
-                />
+                {/* Catalog Main Panel */}
+                <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+                    {/* Top Quick Actions Bar */}
+                    <div className="px-3 sm:px-4 py-2 bg-slate-900/40 border-b border-slate-800 flex justify-between items-center">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Service & Retail Menu
+            </span>
+                        <button
+                            onClick={() => setIsCashOutOpen(true)}
+                            className="h-8 px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 active:bg-rose-600 active:text-white border border-rose-500/20 text-rose-400 font-bold text-xs flex items-center space-x-1.5 transition"
+                        >
+                            <MinusCircle className="w-3.5 h-3.5" />
+                            <span>Quick Cash Out</span>
+                        </button>
+                    </div>
+
+                    {/* Catalog Grid */}
+                    <CatalogGrid
+                        items={catalog}
+                        categories={categories}
+                        selectedCategory={selectedCategory}
+                        onSelectCategory={(category: string) => setSelectedCategory(category)}
+                        onItemSelect={(item: CatalogItem) => handleItemSelect(item)}
+                    />
+                </div>
 
                 {/* Cart Sidebar */}
                 <CartSidebar
@@ -63,22 +84,24 @@ export function POSView() {
                 />
             </div>
 
-            {/* Mobile Floating Cart Indicator */}
-            <div className="lg:hidden fixed bottom-3 left-3 right-3 z-30">
-                <button
-                    onClick={() => setIsMobileCartOpen(true)}
-                    className="w-full h-14 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold rounded-2xl p-4 flex items-center justify-between shadow-2xl transition"
-                >
-                    <div className="flex items-center space-x-2">
-                        <ShoppingBag className="w-5 h-5" />
-                        <span className="text-sm font-semibold">{breakdown.items.length} items</span>
-                    </div>
-                    <div className="flex items-center space-x-1.5 font-mono">
-                        <span className="text-base font-black">{formatPHP(breakdown.netPayable)}</span>
-                        <ChevronUp className="w-5 h-5 stroke-[2.5]" />
-                    </div>
-                </button>
-            </div>
+            {/* Mobile Floating Cart Indicator (Positioned above the mobile bottom navigation bar) */}
+            {breakdown.items.length > 0 && !isMobileCartOpen && (
+                <div className="lg:hidden fixed bottom-16 left-3 right-3 z-30 animate-in fade-in slide-in-from-bottom-2 duration-150">
+                    <button
+                        onClick={() => setIsMobileCartOpen(true)}
+                        className="w-full h-14 bg-sky-500 hover:bg-sky-400 active:bg-sky-600 text-slate-950 font-bold rounded-2xl p-4 flex items-center justify-between shadow-2xl transition"
+                    >
+                        <div className="flex items-center space-x-2">
+                            <ShoppingBag className="w-5 h-5" />
+                            <span className="text-sm font-semibold">{breakdown.items.length} items</span>
+                        </div>
+                        <div className="flex items-center space-x-1.5 font-mono">
+                            <span className="text-base font-black">{formatPHP(breakdown.netPayable)}</span>
+                            <ChevronUp className="w-5 h-5 stroke-[2.5]" />
+                        </div>
+                    </button>
+                </div>
+            )}
 
             {/* Scale Weight Entry Modal */}
             <WeightModal
@@ -103,6 +126,15 @@ export function POSView() {
 
                     if (data) setLastCreatedOrder(data as Order);
                 }}
+            />
+
+            {/* Register Cash Out / Petty Cash Modal */}
+            <CashOutModal
+                storeId={storeId}
+                storeName={storeName}
+                isOpen={isCashOutOpen}
+                onClose={() => setIsCashOutOpen(false)}
+                onSaveExpense={logExpense}
             />
 
             {/* Success Notification */}

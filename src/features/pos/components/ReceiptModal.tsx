@@ -2,7 +2,8 @@
 
 import { Order } from '@/types/database';
 import { formatPHP, formatManilaTime } from '@/lib/formatters';
-import { Printer, X } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
+import { Printer, X, Tag } from 'lucide-react';
 
 interface ReceiptModalProps {
     order: Order | null;
@@ -21,15 +22,21 @@ export function ReceiptModal({ order, storeName, onClose }: ReceiptModalProps) {
     const customerName = order.customer?.full_name || 'Walk-in Customer';
     const customerMobile = order.customer?.mobile_number;
 
+    // Encodes the order number so scanning instantly filters this ticket on the Live Board
+    const qrValue = order.order_number;
+
     return (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
             <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-sm flex flex-col shadow-2xl overflow-hidden max-h-[92vh]">
                 {/* Modal Controls */}
                 <div className="p-4 border-b border-slate-800 flex justify-between items-center print:hidden bg-slate-900">
-                    <span className="font-bold text-white text-sm">Thermal Receipt Preview</span>
+                    <div className="flex items-center space-x-2">
+                        <Tag className="w-4 h-4 text-sky-400" />
+                        <span className="font-bold text-white text-sm">Thermal Receipt Preview</span>
+                    </div>
                     <button
                         onClick={onClose}
-                        className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800"
+                        className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800 transition"
                     >
                         <X className="w-4 h-4" />
                     </button>
@@ -40,14 +47,31 @@ export function ReceiptModal({ order, storeName, onClose }: ReceiptModalProps) {
                     <div className="w-[58mm] bg-white text-black p-3 font-mono text-[11px] leading-tight rounded-sm shadow-md print:w-[58mm] print:shadow-none print:m-0">
                         {/* Store Header */}
                         <div className="text-center pb-2 border-b border-dashed border-black">
-                            <h2 className="text-sm font-black uppercase">{storeName}</h2>
+                            <h2 className="text-sm font-black uppercase tracking-tight">{storeName}</h2>
                             <p className="text-[10px]">LAUNDRY SERVICE CLAIM TICKET</p>
-                            <p className="text-[10px] font-bold mt-1">Ticket #{order.order_number}</p>
+                            <p className="text-[10px] font-bold mt-0.5">Ticket #{order.order_number}</p>
                             <p className="text-[9px] text-gray-700">{formatManilaTime(order.created_at)}</p>
                         </div>
 
+                        {/* Scannable Thermal QR Code */}
+                        <div className="py-2.5 flex flex-col items-center justify-center border-b border-dashed border-black space-y-1">
+                            <div className="p-1 bg-white border border-black rounded">
+                                <QRCodeSVG
+                                    value={qrValue}
+                                    size={104}
+                                    level="M"
+                                    includeMargin={false}
+                                    fgColor="#000000"
+                                    bgColor="#ffffff"
+                                />
+                            </div>
+                            <span className="text-[9px] font-mono tracking-widest text-gray-600">
+                SCAN FOR STATUS / CLAIM
+              </span>
+                        </div>
+
                         {/* Basket Tag Indicator */}
-                        <div className="text-center py-2 border-b border-dashed border-black bg-gray-100 my-1 rounded">
+                        <div className="text-center py-1.5 border-b border-dashed border-black bg-gray-100 my-1 rounded">
                             <span className="text-[9px] uppercase font-bold block text-gray-700">Basket Identifier</span>
                             <span className="text-base font-black tracking-widest">{order.basket_tag}</span>
                         </div>
@@ -139,7 +163,7 @@ export function ReceiptModal({ order, storeName, onClose }: ReceiptModalProps) {
                 <div className="p-4 border-t border-slate-800 bg-slate-900 print:hidden flex space-x-2">
                     <button
                         onClick={handlePrint}
-                        className="flex-1 h-12 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold rounded-xl flex items-center justify-center space-x-2 shadow-lg transition"
+                        className="flex-1 h-12 bg-sky-500 hover:bg-sky-400 active:bg-sky-600 text-slate-950 font-bold rounded-xl flex items-center justify-center space-x-2 shadow-lg transition"
                     >
                         <Printer className="w-4 h-4" />
                         <span>Print 58mm Receipt</span>

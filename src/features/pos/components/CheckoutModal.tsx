@@ -76,7 +76,7 @@ export function CheckoutModal({
     // Compute individual basket weights
     const baseTag = basketTag.trim() || `B-${Math.floor(100 + Math.random() * 900)}`;
     const subBaskets = Array.from({ length: basketCount }, (_, index) => {
-        const letter = String.fromCharCode(65 + index); // A, B, C...
+        const letter = String.fromCharCode(65 + index);
         const weightPerBasket =
             basketCount === 1
                 ? breakdown.totalWeightKg
@@ -216,7 +216,10 @@ export function CheckoutModal({
                         <Receipt className="w-5 h-5 text-sky-400" />
                         <h3 className="font-bold text-white text-base">Receipt & Checkout Details</h3>
                     </div>
-                    <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800">
+                    <button
+                        onClick={onClose}
+                        className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800 transition"
+                    >
                         <X className="w-4 h-4" />
                     </button>
                 </div>
@@ -255,7 +258,7 @@ export function CheckoutModal({
                     />
                 </div>
 
-                {/* Multi-Load Basket Splitter */}
+                {/* Multi-Load Basket Splitter with Enlarged Touch Targets */}
                 <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-2xl space-y-3">
                     <div className="flex justify-between items-center">
                         <div className="flex items-center space-x-1.5 text-xs font-bold text-slate-200">
@@ -266,35 +269,36 @@ export function CheckoutModal({
                             <button
                                 type="button"
                                 onClick={() => setBasketCount((c) => Math.max(1, c - 1))}
-                                className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg flex items-center justify-center transition"
+                                className="w-10 h-10 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 rounded-xl flex items-center justify-center transition"
+                                aria-label="Decrease baskets"
                             >
-                                <Minus className="w-3.5 h-3.5" />
+                                <Minus className="w-4 h-4" />
                             </button>
-                            <span className="font-mono font-bold text-sm text-white w-4 text-center">
+                            <span className="font-mono font-bold text-base text-white w-6 text-center">
                 {basketCount}
               </span>
                             <button
                                 type="button"
                                 onClick={() => setBasketCount((c) => Math.min(6, c + 1))}
-                                className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg flex items-center justify-center transition"
+                                className="w-10 h-10 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 rounded-xl flex items-center justify-center transition"
+                                aria-label="Increase baskets"
                             >
-                                <Plus className="w-3.5 h-3.5" />
+                                <Plus className="w-4 h-4" />
                             </button>
                         </div>
                     </div>
 
                     {breakdown.totalWeightKg > DRUM_CAPACITY_KG && (
-                        <p className="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-1 rounded-lg">
+                        <p className="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 rounded-lg leading-relaxed">
                             Weight ({breakdown.totalWeightKg}kg) exceeds 8kg drum limit. Splitting into {basketCount} physical loads recommended.
                         </p>
                     )}
 
-                    {/* Sub-baskets preview tags */}
                     <div className="flex flex-wrap gap-1.5">
                         {subBaskets.map((b) => (
                             <span
                                 key={b.tag}
-                                className="px-2 py-1 bg-slate-900 border border-slate-800 text-[11px] font-mono rounded-lg text-slate-300"
+                                className="px-2.5 py-1 bg-slate-900 border border-slate-800 text-[11px] font-mono rounded-lg text-slate-300"
                             >
                 <strong>{b.tag}</strong> ({b.weightKg} kg)
               </span>
@@ -369,7 +373,7 @@ export function CheckoutModal({
                                         key={bill}
                                         type="button"
                                         onClick={() => setCashTendered(bill)}
-                                        className="py-1 bg-slate-800 hover:bg-slate-700 text-xs font-mono rounded-lg text-slate-200 transition"
+                                        className="py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-xs font-mono rounded-lg text-slate-200 transition"
                                     >
                                         ₱{bill}
                                     </button>

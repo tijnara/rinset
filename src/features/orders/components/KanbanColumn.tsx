@@ -1,13 +1,13 @@
 'use client';
 
+import { ComponentType } from 'react';
 import { OrderBasket, Order, OrderStatus } from '@/types/database';
 import { OrderCard } from './OrderCard';
-import { LucideIcon } from 'lucide-react';
 
 interface KanbanColumnProps {
     statusKey: OrderStatus;
     label: string;
-    icon: LucideIcon;
+    icon: ComponentType<{ className?: string }>;
     colorClass: string;
     baskets: OrderBasket[];
     onAdvance: (basketId: string, orderId: string, nextStatus: OrderStatus, machineSlot?: string | null) => void;

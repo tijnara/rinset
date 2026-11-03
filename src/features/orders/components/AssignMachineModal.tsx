@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { OrderBasket, OrderStatus } from '@/types/database';
 import { WASHERS, DRYERS } from './MachineStatusOverview';
-import { X, Check, Sparkles, Wind } from 'lucide-react';
+import { Bubbles } from '@/components/icons/Bubbles';
+import { X, Check, Wind } from 'lucide-react';
 
 interface AssignMachineModalProps {
     basket: OrderBasket | null;
@@ -51,7 +52,7 @@ export function AssignMachineModal({
                 <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                     <div className="flex items-center space-x-2">
                         {isWashing ? (
-                            <Sparkles className="w-5 h-5 text-sky-400" />
+                            <Bubbles className="w-5 h-5 text-sky-400" />
                         ) : (
                             <Wind className="w-5 h-5 text-indigo-400" />
                         )}
@@ -59,7 +60,10 @@ export function AssignMachineModal({
                             {isWashing ? 'Assign Washer Drum' : 'Assign Dryer Drum'}
                         </h3>
                     </div>
-                    <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800">
+                    <button
+                        onClick={onClose}
+                        className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800 transition"
+                    >
                         <X className="w-4 h-4" />
                     </button>
                 </div>

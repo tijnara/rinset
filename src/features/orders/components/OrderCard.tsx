@@ -2,7 +2,8 @@
 
 import { OrderBasket, Order, OrderStatus } from '@/types/database';
 import { formatPHP } from '@/lib/formatters';
-import { ArrowRight, DollarSign, Sparkles, Wind } from 'lucide-react';
+import { Bubbles } from '@/components/icons/Bubbles';
+import { ArrowRight, DollarSign, Wind } from 'lucide-react';
 
 interface OrderCardProps {
     basket: OrderBasket;
@@ -104,9 +105,9 @@ export function OrderCard({
                 >
           <span className="flex items-center gap-1.5 text-[11px]">
             {basket.status === 'washing' ? (
-                <Sparkles className="w-3 h-3 text-sky-400" />
+                <Bubbles className="w-3.5 h-3.5 text-sky-400" />
             ) : (
-                <Wind className="w-3 h-3 text-indigo-400" />
+                <Wind className="w-3.5 h-3.5 text-indigo-400" />
             )}
               <span>{basket.status === 'washing' ? 'Drum:' : 'Dryer:'}</span>
           </span>
