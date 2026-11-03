@@ -7,6 +7,7 @@ import { useAuthStore, PinPad } from '@/features/auth';
 import {
     LayoutDashboard,
     ShoppingCart,
+    Users,
     FileSpreadsheet,
     Settings,
     Shield,
@@ -32,6 +33,7 @@ export function Navbar({ storeName }: NavbarProps) {
     const links = [
         { href: '/', label: 'POS', icon: ShoppingCart, protected: false },
         { href: '/orders', label: 'Live Board', icon: LayoutDashboard, protected: false },
+        { href: '/customers', label: 'Customers', icon: Users, protected: false },
         { href: '/audit', label: 'Z-Reading', icon: FileSpreadsheet, protected: true },
         { href: '/catalog', label: 'Rates', icon: Settings, protected: true },
     ];
@@ -46,7 +48,7 @@ export function Navbar({ storeName }: NavbarProps) {
                         </div>
                         <div>
                             <h1 className="text-base font-bold text-white leading-none">Rinset</h1>
-                            <p className="text-[10px] text-slate-400 leading-tight truncate max-w-[120px] sm:max-w-none">
+                            <p className="text-[10px] text-slate-400 leading-tight truncate max-w-[100px] sm:max-w-none">
                                 {storeName}
                             </p>
                         </div>
@@ -63,7 +65,7 @@ export function Navbar({ storeName }: NavbarProps) {
                                 <Link
                                     key={link.href}
                                     href={link.href}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition ${
+                                    className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition ${
                                         isActive
                                             ? 'bg-sky-500 text-slate-950 shadow-sm'
                                             : isLockedForCashier

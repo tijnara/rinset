@@ -1,8 +1,9 @@
 'use client';
 
 import { useCartStore } from '@/features/pos/store/useCartStore';
+import { CustomerAutocomplete } from './CustomerAutocomplete';
 import { formatPHP } from '@/lib/formatters';
-import { ShoppingBag, Trash2, Plus, Minus, Sparkles, User, Tag } from 'lucide-react';
+import { ShoppingBag, Trash2, Plus, Minus, Sparkles, Tag } from 'lucide-react';
 
 interface CartSidebarProps {
     isOpenOnMobile: boolean;
@@ -34,7 +35,7 @@ export function CartSidebar({
                 isOpenOnMobile ? 'fixed inset-0 z-40 lg:static' : 'hidden lg:flex'
             }`}
         >
-            {/* Cart Header */}
+            {/* Header */}
             <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900">
                 <div className="flex items-center space-x-2">
                     <ShoppingBag className="w-5 h-5 text-sky-400" />
@@ -50,40 +51,27 @@ export function CartSidebar({
                 )}
             </div>
 
-            {/* Customer & Basket Tag Controls */}
+            {/* Basket Tag & Customer Search Controls */}
             <div className="p-4 border-b border-slate-800 space-y-3 bg-slate-950/40">
-                <div className="flex space-x-2">
-                    <div className="flex-1 relative">
-                        <Tag className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
-                        <input
-                            type="text"
-                            placeholder="Basket # (e.g. B-01)"
-                            value={basketTag}
-                            onChange={(e) => setBasketTag(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white uppercase font-mono focus:border-sky-500 focus:outline-none"
-                        />
-                    </div>
-                </div>
-
-                <div className="space-y-1.5">
-                    <div className="relative">
-                        <User className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
-                        <input
-                            type="text"
-                            placeholder="Customer Name (optional)"
-                            value={customerName}
-                            onChange={(e) => setCustomer(e.target.value, customerMobile)}
-                            className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:border-sky-500 focus:outline-none"
-                        />
-                    </div>
+                <div className="relative">
+                    <Tag className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
                     <input
                         type="text"
-                        placeholder="Mobile (0917...)"
-                        value={customerMobile}
-                        onChange={(e) => setCustomer(customerName, e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-sky-500 focus:outline-none"
+                        placeholder="Basket # (e.g. B-01)"
+                        value={basketTag}
+                        onChange={(e) => setBasketTag(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white uppercase font-mono focus:border-sky-500 focus:outline-none"
                     />
                 </div>
+
+                {/* Customer Live Lookup & Autofill */}
+                <CustomerAutocomplete
+                    customerName={customerName}
+                    customerMobile={customerMobile}
+                    onSelect={(name, mobile) => setCustomer(name, mobile)}
+                    onNameChange={(name) => setCustomer(name, customerMobile)}
+                    onMobileChange={(mobile) => setCustomer(customerName, mobile)}
+                />
             </div>
 
             {/* Cart Items List */}
@@ -141,7 +129,7 @@ export function CartSidebar({
                 )}
             </div>
 
-            {/* Subtotal & Checkout Action */}
+            {/* Totals & Proceed */}
             <div className="p-4 border-t border-slate-800 bg-slate-950/80 space-y-3">
                 <div className="space-y-1.5 text-xs font-mono">
                     <div className="flex justify-between text-slate-400">
