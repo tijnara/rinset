@@ -3,20 +3,39 @@ import { formatPHP, formatManilaTime } from '@/lib/formatters';
 import { CheckCircle2, MapPin, Bike } from 'lucide-react';
 import { Bubbles } from '@/components/icons/Bubbles';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Prevent Next.js from attempting to prerender this route during build time
+export const dynamic = 'force-dynamic';
 
-export default async function PublicTrackingPage({
-                                                     params,
-                                                 }: {
-    params: { orderNumber: string };
-}) {
+interface PageProps {
+    params: Promise<{ orderNumber: string }> | { orderNumber: string };
+}
+
+export default async function PublicTrackingPage({ params }: PageProps) {
+    // Await params to comply with Next.js 15/16 Promise params
+    const resolvedParams = await params;
+    const orderNumber = resolvedParams?.orderNumber;
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+    if (!supabaseUrl || !supabaseAnonKey || !orderNumber) {
+        return (
+            <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 text-center">
+                <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl max-w-sm w-full">
+                    <h1 className="text-xl font-bold text-white mb-2">Ticket Not Found</h1>
+                    <p className="text-slate-400 text-sm">Please check the link on your receipt and try again.</p>
+                </div>
+            </div>
+        );
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
     const { data: order, error } = await supabase
         .from('orders')
         .select('*, store:stores(name)')
-        .eq('order_number', params.orderNumber)
-        .single();
+        .eq('order_number', orderNumber)
+        .maybeSingle();
 
     if (error || !order) {
         return (
@@ -33,7 +52,7 @@ export default async function PublicTrackingPage({
     const isReady = ['ready_for_pickup', 'claimed'].includes(order.status);
     const isClaimed = order.status === 'claimed';
 
-    // Calculate Overdue Penalties
+    // Overdue calculations
     const daysOld = Math.floor(
         (Date.now() - new Date(order.created_at).getTime()) / (1000 * 60 * 60 * 24)
     );
@@ -54,7 +73,7 @@ export default async function PublicTrackingPage({
                     <p className="text-xs text-slate-400 font-mono">Ticket #{order.order_number}</p>
                 </div>
 
-                {/* Live Status Banner */}
+                {/* Status Banner */}
                 <div
                     className={`p-5 rounded-2xl border text-center ${
                         isClaimed
@@ -83,7 +102,7 @@ export default async function PublicTrackingPage({
                     </p>
                 </div>
 
-                {/* Storage Location & Dispatch Details */}
+                {/* Cubby Storage Location */}
                 {order.storage_location && !isClaimed && (
                     <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center space-x-3">
                         <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400">
@@ -96,6 +115,7 @@ export default async function PublicTrackingPage({
                     </div>
                 )}
 
+                {/* Delivery Details */}
                 {order.delivery_mode === 'delivery' && (
                     <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center space-x-3">
                         <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
