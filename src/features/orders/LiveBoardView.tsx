@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, ComponentType } from 'react';
+import { createClient } from '@/lib/supabase/client';
 import { OrderBasket, Order, OrderStatus } from '@/types/database';
 import { useLiveOrders } from '@/features/orders/hooks/useLiveOrders';
 import { KanbanColumn } from '@/features/orders/components/KanbanColumn';
@@ -8,6 +9,7 @@ import { SettleClaimModal } from '@/features/orders/components/SettleClaimModal'
 import { QrScannerModal } from '@/features/orders/components/QrScannerModal';
 import { MachineStatusOverview } from '@/features/orders/components/MachineStatusOverview';
 import { AssignMachineModal } from '@/features/orders/components/AssignMachineModal';
+import { AssignStorageModal } from '@/features/orders/components/AssignStorageModal';
 import { Navbar } from '@/components/layout/Navbar';
 import { Bubbles } from '@/components/icons/Bubbles';
 import {
@@ -45,14 +47,34 @@ export function LiveBoardView() {
         targetStatus: OrderStatus;
     } | null>(null);
 
+    const [storageTarget, setStorageTarget] = useState<OrderBasket | null>(null);
+
     const filteredBaskets = baskets.filter((b) => {
         const q = searchQuery.toLowerCase();
         const matchesTag = b.basket_tag.toLowerCase().includes(q);
         const matchesNum = b.order?.order_number.toLowerCase().includes(q) ?? false;
         const matchesCustomer = b.order?.customer?.full_name?.toLowerCase().includes(q) ?? false;
         const matchesMachine = b.assigned_machine?.toLowerCase().includes(q) ?? false;
-        return matchesTag || matchesNum || matchesCustomer || matchesMachine;
+        const matchesLocation = b.order?.storage_location?.toLowerCase().includes(q) ?? false;
+        return matchesTag || matchesNum || matchesCustomer || matchesMachine || matchesLocation;
     });
+
+    const handleConfirmStorage = async (location: string) => {
+        if (!storageTarget) return;
+        const supabase = createClient();
+
+        // Save cubby location to the parent order
+        await supabase
+            .from('orders')
+            .update({ storage_location: location })
+            .eq('id', storageTarget.order_id);
+
+        // Advance basket to ready_for_pickup
+        await updateBasketStatus(storageTarget.id, storageTarget.order_id, 'ready_for_pickup', null);
+
+        setStorageTarget(null);
+        refreshOrders();
+    };
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none pb-16 md:pb-0">
@@ -66,7 +88,7 @@ export function LiveBoardView() {
                         <Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
                         <input
                             type="text"
-                            placeholder="Search basket (B-01A), order #, machine..."
+                            placeholder="Search basket, ticket #, shelf location..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:border-sky-500 focus:outline-none"
@@ -104,11 +126,13 @@ export function LiveBoardView() {
                         onRequestAssign={(basket, targetStatus) =>
                             setAssignTarget({ basket, targetStatus })
                         }
+                        onRequestStorage={(basket) => setStorageTarget(basket)}
                         onSettle={(order) => setOrderToSettle(order)}
                     />
                 ))}
             </div>
 
+            {/* Machine Drum Selection Modal */}
             <AssignMachineModal
                 basket={assignTarget?.basket || null}
                 targetStatus={assignTarget?.targetStatus || null}
@@ -118,6 +142,14 @@ export function LiveBoardView() {
                 onConfirm={(basketId, orderId, nextStatus, machineId) => {
                     updateBasketStatus(basketId, orderId, nextStatus, machineId);
                 }}
+            />
+
+            {/* Storage Shelf / Cubby Modal */}
+            <AssignStorageModal
+                basket={storageTarget}
+                isOpen={Boolean(storageTarget)}
+                onClose={() => setStorageTarget(null)}
+                onConfirm={handleConfirmStorage}
             />
 
             <SettleClaimModal

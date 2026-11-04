@@ -8,8 +8,9 @@ export type OrderStatus =
     | 'cancelled';
 
 export type PricingType = 'per_kilo' | 'per_piece' | 'per_load' | 'consumable';
-export type PaymentStatus = 'unpaid' | 'partially_paid' | 'paid';
+//export type PaymentStatus = 'unpaid' | 'partially_paid' | 'paid';
 export type PaymentMethod = 'cash' | 'gcash' | 'maya' | 'bank_transfer';
+export type PaymentStatus = 'paid' | 'unpaid' | 'refunded';
 
 export interface Store {
     id: string;
@@ -118,4 +119,34 @@ export interface StoreExpense {
     description: string;
     recorded_by: string;
     created_at: string;
+}
+
+// Inside src/types/database.ts, update the Order interface:
+
+export interface Order {
+    id: string;
+    store_id: string;
+    customer_id: string | null;
+    order_number: string;
+    basket_tag: string;
+    status: OrderStatus;
+    payment_status: PaymentStatus;
+    total_weight_kg: number;
+    subtotal: number;
+    discount_amount: number;
+    net_payable: number;
+    total_paid: number;
+    created_at: string;
+    updated_at: string;
+
+    // Operational & Dispatch extensions
+    storage_location?: string | null;
+    special_notes?: string[];
+    delivery_mode?: 'walk_in' | 'delivery';
+    delivery_address?: string | null;
+    delivery_fee?: number;
+
+    // Joined relations
+    customer?: Customer;
+    items?: OrderItem[];
 }

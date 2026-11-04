@@ -12,6 +12,7 @@ interface KanbanColumnProps {
     baskets: OrderBasket[];
     onAdvance: (basketId: string, orderId: string, nextStatus: OrderStatus, machineSlot?: string | null) => void;
     onRequestAssign: (basket: OrderBasket, targetStatus: OrderStatus) => void;
+    onRequestStorage: (basket: OrderBasket) => void;
     onSettle: (order: Order) => void;
 }
 
@@ -22,6 +23,7 @@ export function KanbanColumn({
                                  baskets,
                                  onAdvance,
                                  onRequestAssign,
+                                 onRequestStorage,
                                  onSettle,
                              }: KanbanColumnProps) {
     return (
@@ -50,6 +52,7 @@ export function KanbanColumn({
                             basket={basket}
                             onAdvance={onAdvance}
                             onRequestAssign={onRequestAssign}
+                            onRequestStorage={onRequestStorage}
                             onSettle={onSettle}
                         />
                     ))

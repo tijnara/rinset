@@ -18,6 +18,8 @@ import {
     Layers,
     Plus,
     Minus,
+    AlertTriangle,
+    Bike,
 } from 'lucide-react';
 
 interface CheckoutModalProps {
@@ -28,6 +30,12 @@ interface CheckoutModalProps {
 }
 
 const DRUM_CAPACITY_KG = 8;
+const WAIVER_TAGS = [
+    'Existing Tear / Punit',
+    'Heavy Stains / Mancha',
+    'Color Bleed Risk / Hawa',
+    'Waived Sorting (Mix)',
+];
 
 export function CheckoutModal({
                                   storeId,
@@ -52,7 +60,14 @@ export function CheckoutModal({
     const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-    // Multi-load split state
+    // New Operational States
+    const [specialNotes, setSpecialNotes] = useState<string[]>([]);
+    const [deliveryMode, setDeliveryMode] = useState<'walk_in' | 'delivery'>('walk_in');
+    const [deliveryAddress, setDeliveryAddress] = useState<string>('');
+    const [deliveryFee, setDeliveryFee] = useState<number>(0);
+
+    const finalPayable = breakdown.netPayable + (deliveryMode === 'delivery' ? deliveryFee : 0);
+
     const recommendedBaskets =
         breakdown.totalWeightKg > DRUM_CAPACITY_KG
             ? Math.ceil(breakdown.totalWeightKg / DRUM_CAPACITY_KG)
@@ -61,19 +76,18 @@ export function CheckoutModal({
     const [basketCount, setBasketCount] = useState<number>(1);
 
     useEffect(() => {
-        setCashTendered(breakdown.netPayable);
+        setCashTendered(finalPayable);
         setBasketCount(recommendedBaskets);
-    }, [breakdown.netPayable, recommendedBaskets]);
+    }, [finalPayable, recommendedBaskets]);
 
     if (!isOpen) return null;
 
     const paymentCalc = calculatePayment(
-        breakdown.netPayable,
+        finalPayable,
         paymentType === 'cash' ? cashTendered : 0,
-        paymentType === 'gcash' ? breakdown.netPayable : 0
+        paymentType === 'gcash' ? finalPayable : 0
     );
 
-    // Compute individual basket weights
     const baseTag = basketTag.trim() || `B-${Math.floor(100 + Math.random() * 900)}`;
     const subBaskets = Array.from({ length: basketCount }, (_, index) => {
         const letter = String.fromCharCode(65 + index);
@@ -87,9 +101,19 @@ export function CheckoutModal({
         };
     });
 
+    const toggleNote = (note: string) => {
+        setSpecialNotes((prev) =>
+            prev.includes(note) ? prev.filter((n) => n !== note) : [...prev, note]
+        );
+    };
+
     const handleCompleteCheckout = async () => {
         if (!customerName.trim()) {
-            setErrorMsg('Customer name is required for receipt and basket tag identification.');
+            setErrorMsg('Customer name is required.');
+            return;
+        }
+        if (deliveryMode === 'delivery' && !deliveryAddress.trim()) {
+            setErrorMsg('Delivery address is required for dispatch.');
             return;
         }
 
@@ -98,7 +122,6 @@ export function CheckoutModal({
         const supabase = createClient();
 
         try {
-            // 1. Customer resolution
             let customerId: string | null = null;
             if (customerMobile.trim()) {
                 const { data: existingCust } = await supabase
@@ -106,7 +129,6 @@ export function CheckoutModal({
                     .select('id')
                     .eq('mobile_number', customerMobile.trim())
                     .maybeSingle();
-
                 if (existingCust) customerId = existingCust.id;
             }
 
@@ -120,14 +142,11 @@ export function CheckoutModal({
                     })
                     .select('id')
                     .single();
-
                 if (custErr) throw custErr;
                 customerId = newCust.id;
             }
 
-            // 2. Generate Order
-            const randomTicketNum = Math.floor(1000 + Math.random() * 9000);
-            const orderNumber = `RNS-${randomTicketNum}`;
+            const orderNumber = `RNS-${Math.floor(1000 + Math.random() * 9000)}`;
             const isPaid = paymentType !== 'pay_on_claim';
 
             const { data: orderData, error: orderErr } = await supabase
@@ -142,26 +161,27 @@ export function CheckoutModal({
                     total_weight_kg: breakdown.totalWeightKg,
                     subtotal: breakdown.subtotal,
                     discount_amount: 0,
-                    net_payable: breakdown.netPayable,
-                    total_paid: isPaid ? breakdown.netPayable : 0,
+                    net_payable: finalPayable,
+                    total_paid: isPaid ? finalPayable : 0,
+                    special_notes: specialNotes,
+                    delivery_mode: deliveryMode,
+                    delivery_address: deliveryMode === 'delivery' ? deliveryAddress : null,
+                    delivery_fee: deliveryMode === 'delivery' ? deliveryFee : 0,
                 })
                 .select('id')
                 .single();
 
             if (orderErr) throw orderErr;
 
-            // 3. Insert Sub-Baskets into order_baskets
             const basketsPayload = subBaskets.map((b) => ({
                 order_id: orderData.id,
                 basket_tag: b.tag,
                 weight_kg: b.weightKg,
                 status: 'received',
             }));
-
             const { error: basketsErr } = await supabase.from('order_baskets').insert(basketsPayload);
             if (basketsErr) throw basketsErr;
 
-            // 4. Insert Order Items
             const orderItems = breakdown.items.map((i) => ({
                 order_id: orderData.id,
                 catalog_item_id: i.id,
@@ -172,17 +192,15 @@ export function CheckoutModal({
                 billable_quantity: i.billableQuantity,
                 item_total: i.itemTotal,
             }));
-
             const { error: itemsErr } = await supabase.from('order_items').insert(orderItems);
             if (itemsErr) throw itemsErr;
 
-            // 5. Insert Payment Record
             if (isPaid) {
                 const { error: payErr } = await supabase.from('payments').insert({
                     order_id: orderData.id,
                     payment_method: paymentType === 'cash' ? 'cash' : 'gcash',
-                    amount: breakdown.netPayable,
-                    tendered_amount: paymentType === 'cash' ? cashTendered : breakdown.netPayable,
+                    amount: finalPayable,
+                    tendered_amount: paymentType === 'cash' ? cashTendered : finalPayable,
                     change_amount: paymentType === 'cash' ? paymentCalc.changeDue : 0,
                     reference_number: paymentType === 'gcash' ? gcashRef : null,
                 });
@@ -190,19 +208,14 @@ export function CheckoutModal({
             }
 
             clearCart();
+            setSpecialNotes([]);
+            setDeliveryMode('walk_in');
+            setDeliveryFee(0);
             onSuccess(orderNumber);
             onClose();
         } catch (err: unknown) {
             console.error('Checkout error:', err);
-            let msg = 'Checkout failed';
-
-            if (err instanceof Error) {
-                msg = err.message;
-            } else if (typeof err === 'object' && err !== null && 'message' in err) {
-                msg = String((err as { message: unknown }).message);
-            }
-
-            setErrorMsg(msg);
+            setErrorMsg(err instanceof Error ? err.message : 'Checkout failed');
         } finally {
             setIsSubmitting(false);
         }
@@ -210,16 +223,13 @@ export function CheckoutModal({
 
     return (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-150">
-            <div className="w-full sm:max-w-md bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-2xl p-5 shadow-2xl flex flex-col space-y-4 max-h-[92vh] overflow-y-auto">
+            <div className="w-full sm:max-w-lg bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-2xl p-5 shadow-2xl flex flex-col space-y-4 max-h-[92vh] overflow-y-auto">
                 <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                     <div className="flex items-center space-x-2">
                         <Receipt className="w-5 h-5 text-sky-400" />
-                        <h3 className="font-bold text-white text-base">Receipt & Checkout Details</h3>
+                        <h3 className="font-bold text-white text-base">Checkout & Dispatch</h3>
                     </div>
-                    <button
-                        onClick={onClose}
-                        className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800 transition"
-                    >
+                    <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800">
                         <X className="w-4 h-4" />
                     </button>
                 </div>
@@ -231,22 +241,40 @@ export function CheckoutModal({
               Total Amount Due
             </span>
                         <span className="text-2xl font-mono font-bold text-white">
-              {formatPHP(breakdown.netPayable)}
+              {formatPHP(finalPayable)}
             </span>
                     </div>
                     <span className="text-xs font-mono text-slate-400">
-            {breakdown.totalWeightKg > 0 ? `${breakdown.totalWeightKg} kg total` : `${breakdown.items.length} items`}
+            {breakdown.totalWeightKg > 0 ? `${breakdown.totalWeightKg.toFixed(2)} kg total` : `${breakdown.items.length} items`}
           </span>
                 </div>
 
-                {/* Customer Information */}
-                <div className="space-y-2 bg-slate-950/70 border border-slate-800/80 p-3.5 rounded-2xl">
-                    <div className="flex justify-between items-center mb-1">
+                {/* Customer & Delivery Toggle */}
+                <div className="space-y-3 bg-slate-950/70 border border-slate-800/80 p-3.5 rounded-2xl">
+                    <div className="flex justify-between items-center">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-              <User className="w-3.5 h-3.5 text-sky-400" />
-              Customer Details (For Receipt)
+              <User className="w-3.5 h-3.5 text-sky-400" /> Customer & Dispatch
             </span>
-                        <span className="text-[10px] text-rose-400 font-semibold">* Required</span>
+                        <div className="flex bg-slate-900 border border-slate-700 rounded-lg p-0.5">
+                            <button
+                                type="button"
+                                onClick={() => setDeliveryMode('walk_in')}
+                                className={`px-3 py-1 text-[10px] font-bold rounded-md transition ${
+                                    deliveryMode === 'walk_in' ? 'bg-sky-500 text-slate-950' : 'text-slate-400'
+                                }`}
+                            >
+                                Walk-in
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setDeliveryMode('delivery')}
+                                className={`px-3 py-1 text-[10px] font-bold rounded-md transition flex items-center gap-1 ${
+                                    deliveryMode === 'delivery' ? 'bg-indigo-500 text-white' : 'text-slate-400'
+                                }`}
+                            >
+                                <Bike className="w-3 h-3" /> Delivery
+                            </button>
+                        </div>
                     </div>
 
                     <CustomerAutocomplete
@@ -256,57 +284,60 @@ export function CheckoutModal({
                         onNameChange={(name) => setCustomer(name, customerMobile)}
                         onMobileChange={(mobile) => setCustomer(customerName, mobile)}
                     />
-                </div>
 
-                {/* Multi-Load Basket Splitter with Enlarged Touch Targets */}
-                <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-2xl space-y-3">
-                    <div className="flex justify-between items-center">
-                        <div className="flex items-center space-x-1.5 text-xs font-bold text-slate-200">
-                            <Layers className="w-4 h-4 text-sky-400" />
-                            <span>Physical Baskets / Machine Loads</span>
+                    {deliveryMode === 'delivery' && (
+                        <div className="pt-2 border-t border-slate-800 grid grid-cols-3 gap-2">
+                            <div className="col-span-2">
+                                <label className="text-[10px] font-bold text-slate-400">Delivery Address</label>
+                                <input
+                                    type="text"
+                                    placeholder="Street name, Brgy, Landmarks..."
+                                    value={deliveryAddress}
+                                    onChange={(e) => setDeliveryAddress(e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400">Delivery Fee (₱)</label>
+                                <input
+                                    type="number"
+                                    value={deliveryFee || ''}
+                                    onChange={(e) => setDeliveryFee(parseFloat(e.target.value) || 0)}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none text-right"
+                                />
+                            </div>
                         </div>
-                        <div className="flex items-center space-x-2">
-                            <button
-                                type="button"
-                                onClick={() => setBasketCount((c) => Math.max(1, c - 1))}
-                                className="w-10 h-10 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 rounded-xl flex items-center justify-center transition"
-                                aria-label="Decrease baskets"
-                            >
-                                <Minus className="w-4 h-4" />
-                            </button>
-                            <span className="font-mono font-bold text-base text-white w-6 text-center">
-                {basketCount}
-              </span>
-                            <button
-                                type="button"
-                                onClick={() => setBasketCount((c) => Math.min(6, c + 1))}
-                                className="w-10 h-10 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 rounded-xl flex items-center justify-center transition"
-                                aria-label="Increase baskets"
-                            >
-                                <Plus className="w-4 h-4" />
-                            </button>
-                        </div>
-                    </div>
-
-                    {breakdown.totalWeightKg > DRUM_CAPACITY_KG && (
-                        <p className="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 rounded-lg leading-relaxed">
-                            Weight ({breakdown.totalWeightKg}kg) exceeds 8kg drum limit. Splitting into {basketCount} physical loads recommended.
-                        </p>
                     )}
+                </div>
 
-                    <div className="flex flex-wrap gap-1.5">
-                        {subBaskets.map((b) => (
-                            <span
-                                key={b.tag}
-                                className="px-2.5 py-1 bg-slate-900 border border-slate-800 text-[11px] font-mono rounded-lg text-slate-300"
-                            >
-                <strong>{b.tag}</strong> ({b.weightKg} kg)
-              </span>
-                        ))}
+                {/* Intake Conditions & Liability Waivers */}
+                <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-2xl space-y-2">
+                    <div className="flex items-center space-x-1.5 text-xs font-bold text-amber-400">
+                        <AlertTriangle className="w-4 h-4" />
+                        <span>Intake Condition & Liability Waivers</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                        {WAIVER_TAGS.map((tag) => {
+                            const isActive = specialNotes.includes(tag);
+                            return (
+                                <button
+                                    key={tag}
+                                    type="button"
+                                    onClick={() => toggleNote(tag)}
+                                    className={`p-2 rounded-xl text-[10px] font-semibold text-left border transition ${
+                                        isActive
+                                            ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                                            : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600'
+                                    }`}
+                                >
+                                    {tag}
+                                </button>
+                            );
+                        })}
                     </div>
                 </div>
 
-                {/* Payment Method Selector */}
+                {/* Payment Selectors */}
                 <div className="space-y-1.5">
                     <label className="text-xs text-slate-400 block font-semibold">Payment Option:</label>
                     <div className="grid grid-cols-3 gap-2">
@@ -314,35 +345,27 @@ export function CheckoutModal({
                             type="button"
                             onClick={() => setPaymentType('cash')}
                             className={`p-2.5 rounded-xl border flex flex-col items-center justify-center space-y-1 transition ${
-                                paymentType === 'cash'
-                                    ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400 font-bold'
-                                    : 'bg-slate-800/40 border-slate-800 text-slate-400 hover:border-slate-700'
+                                paymentType === 'cash' ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400 font-bold' : 'bg-slate-800/40 border-slate-800 text-slate-400'
                             }`}
                         >
                             <Banknote className="w-4 h-4" />
                             <span className="text-xs">Cash</span>
                         </button>
-
                         <button
                             type="button"
                             onClick={() => setPaymentType('gcash')}
                             className={`p-2.5 rounded-xl border flex flex-col items-center justify-center space-y-1 transition ${
-                                paymentType === 'gcash'
-                                    ? 'bg-sky-500/10 border-sky-500 text-sky-400 font-bold'
-                                    : 'bg-slate-800/40 border-slate-800 text-slate-400 hover:border-slate-700'
+                                paymentType === 'gcash' ? 'bg-sky-500/10 border-sky-500 text-sky-400 font-bold' : 'bg-slate-800/40 border-slate-800 text-slate-400'
                             }`}
                         >
                             <Smartphone className="w-4 h-4" />
                             <span className="text-xs">GCash</span>
                         </button>
-
                         <button
                             type="button"
                             onClick={() => setPaymentType('pay_on_claim')}
                             className={`p-2.5 rounded-xl border flex flex-col items-center justify-center space-y-1 transition ${
-                                paymentType === 'pay_on_claim'
-                                    ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-bold'
-                                    : 'bg-slate-800/40 border-slate-800 text-slate-400 hover:border-slate-700'
+                                paymentType === 'pay_on_claim' ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-bold' : 'bg-slate-800/40 border-slate-800 text-slate-400'
                             }`}
                         >
                             <Clock className="w-4 h-4" />
@@ -351,7 +374,7 @@ export function CheckoutModal({
                     </div>
                 </div>
 
-                {/* Cash Tender & Change */}
+                {/* Cash Tender */}
                 {paymentType === 'cash' && (
                     <div className="space-y-3 bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
                         <div className="flex justify-between items-center">
@@ -363,46 +386,24 @@ export function CheckoutModal({
                                 className="w-36 bg-slate-900 border border-slate-700 rounded-lg p-2 text-right font-mono text-white text-base focus:border-sky-500 focus:outline-none"
                             />
                         </div>
-
                         <div className="grid grid-cols-4 gap-1.5 pt-1">
-                            {[breakdown.netPayable, 100, 200, 500, 1000]
-                                .filter((v, i, arr) => arr.indexOf(v) === i && v >= breakdown.netPayable)
-                                .slice(0, 4)
-                                .map((bill) => (
-                                    <button
-                                        key={bill}
-                                        type="button"
-                                        onClick={() => setCashTendered(bill)}
-                                        className="py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-xs font-mono rounded-lg text-slate-200 transition"
-                                    >
-                                        ₱{bill}
-                                    </button>
-                                ))}
+                            {[finalPayable, 100, 200, 500, 1000].filter((v, i, arr) => arr.indexOf(v) === i && v >= finalPayable).slice(0, 4).map((bill) => (
+                                <button
+                                    key={bill}
+                                    type="button"
+                                    onClick={() => setCashTendered(bill)}
+                                    className="py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-xs font-mono rounded-lg text-slate-200 transition"
+                                >
+                                    ₱{bill}
+                                </button>
+                            ))}
                         </div>
-
                         <div className="pt-2 border-t border-slate-800 flex justify-between items-center font-mono text-sm">
                             <span className="text-slate-400 text-xs">Change Due:</span>
-                            <span
-                                className={`font-bold text-base ${
-                                    paymentCalc.changeDue >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                                }`}
-                            >
+                            <span className={`font-bold text-base ${paymentCalc.changeDue >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                 {formatPHP(paymentCalc.changeDue)}
               </span>
                         </div>
-                    </div>
-                )}
-
-                {paymentType === 'gcash' && (
-                    <div className="space-y-1 bg-slate-950 border border-slate-800 p-3 rounded-xl">
-                        <label className="text-xs text-slate-400">GCash Ref No. (optional):</label>
-                        <input
-                            type="text"
-                            placeholder="e.g. 1029 4829 1049"
-                            value={gcashRef}
-                            onChange={(e) => setGcashRef(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs font-mono text-white focus:border-sky-500 focus:outline-none"
-                        />
                     </div>
                 )}
 
@@ -415,18 +416,10 @@ export function CheckoutModal({
 
                 <button
                     onClick={handleCompleteCheckout}
-                    disabled={
-                        isSubmitting ||
-                        !customerName.trim() ||
-                        (paymentType === 'cash' && cashTendered < breakdown.netPayable)
-                    }
+                    disabled={isSubmitting || !customerName.trim() || (paymentType === 'cash' && cashTendered < finalPayable)}
                     className="w-full h-13 bg-sky-500 hover:bg-sky-400 disabled:opacity-40 active:bg-sky-600 text-slate-950 font-bold text-sm rounded-xl flex items-center justify-center space-x-2 shadow-lg transition"
                 >
-                    {isSubmitting ? (
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                        <span>Confirm & Print Receipt ({basketCount} {basketCount === 1 ? 'Basket' : 'Baskets'})</span>
-                    )}
+                    {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Confirm & Print Receipt</span>}
                 </button>
             </div>
         </div>
