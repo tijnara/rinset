@@ -39,22 +39,28 @@ export function Navbar({ storeName }: NavbarProps) {
         { href: '/catalog', label: 'Rates', icon: Settings, protected: true },
     ];
 
+    const handleLockShift = () => {
+        lockToCashier();
+        router.push('/');
+    };
+
     return (
         <>
-            {/* Top Header Bar */}
-            <header className="h-14 border-b border-slate-800 px-3 sm:px-4 flex items-center justify-between bg-slate-900/90 backdrop-blur sticky top-0 z-30 flex-shrink-0">
-                <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
+            {/* 1. Main Header Bar (Sticky Top) */}
+            <header className="sticky top-0 z-30 grid min-h-14 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-y-2 border-b border-slate-800 bg-slate-900 px-4 py-2 lg:h-14 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:gap-y-0 lg:py-0">
+                {/* Left: Brand Logo & Store Name */}
+                <div className="flex items-center space-x-2.5 min-w-0">
                     <RinsetLogo className="w-8 h-8 flex-shrink-0" />
                     <div className="min-w-0">
-                        <h1 className="text-sm sm:text-base font-bold text-white leading-none">Rinset</h1>
-                        <p className="text-[10px] text-slate-400 leading-tight truncate max-w-[110px] sm:max-w-[200px]">
+                        <h1 className="text-base font-bold text-white leading-none">Rinset</h1>
+                        <p className="text-[10px] text-slate-400 leading-tight truncate max-w-[140px] sm:max-w-[220px] mt-0.5">
                             {storeName}
                         </p>
                     </div>
                 </div>
 
-                {/* Desktop Navigation */}
-                <nav className="hidden md:flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                {/* Center: Desktop Navigation Bar (Only on md+ screens) */}
+                <nav aria-label="Desktop navigation" className="hidden items-center space-x-1 rounded-xl border border-slate-800 bg-slate-950 p-1 md:col-span-2 md:row-start-2 md:flex md:justify-self-center lg:col-span-1 lg:col-start-2 lg:row-start-1">
                     {links.map((link) => {
                         const Icon = link.icon;
                         const isActive = pathname === link.href;
@@ -64,7 +70,7 @@ export function Navbar({ storeName }: NavbarProps) {
                             <Link
                                 key={link.href}
                                 href={link.href}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition ${
+                                className={`flex items-center space-x-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-semibold transition lg:px-3 ${
                                     isActive
                                         ? 'bg-sky-500 text-slate-950 shadow-sm'
                                         : isLockedForCashier
@@ -72,88 +78,93 @@ export function Navbar({ storeName }: NavbarProps) {
                                             : 'text-slate-400 hover:text-white'
                                 }`}
                             >
-                                <Icon className="w-3.5 h-3.5" />
+                                <Icon className="w-3.5 h-3.5 flex-shrink-0" />
                                 <span>{link.label}</span>
                                 {isLockedForCashier && (
-                                    <Lock className="w-2.5 h-2.5 text-slate-500 ml-0.5" />
+                                    <Lock className="w-2.5 h-2.5 text-slate-500 ml-0.5 flex-shrink-0" />
                                 )}
                             </Link>
                         );
                     })}
                 </nav>
 
-                {/* User Role Badge & Shift Switcher */}
-                <div className="flex items-center space-x-1.5 flex-shrink-0">
+                {/* Right: Shift Status & Lock to Cashier Controls */}
+                <div className="col-start-2 row-start-1 flex items-center justify-self-end lg:col-start-3">
                     {isOwner ? (
-                        <div className="flex items-center space-x-1 sm:space-x-1.5">
-              <span className="px-2 sm:px-2.5 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold rounded-xl flex items-center space-x-1 shadow-sm">
-                <Shield className="w-3.5 h-3.5" />
+                        <div className="flex items-center gap-1 sm:gap-1.5">
+              <span aria-label="Store Owner" className="px-2.5 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold rounded-xl flex items-center space-x-1 whitespace-nowrap shadow-sm">
+                <Shield className="w-3.5 h-3.5 flex-shrink-0" />
                 <span className="hidden sm:inline">Store Owner</span>
+                <span className="sm:hidden">Owner</span>
               </span>
+
                             <button
-                                onClick={() => {
-                                    lockToCashier();
-                                    router.push('/');
-                                }}
-                                className="p-1.5 sm:px-2.5 sm:py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-xl flex items-center space-x-1 transition active:bg-slate-600"
+                                type="button"
+                                onClick={handleLockShift}
+                                className="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500/20 active:bg-rose-600 active:text-white border border-rose-500/30 text-rose-400 text-xs font-bold rounded-xl flex items-center space-x-1 whitespace-nowrap transition shadow-sm"
                                 title="Lock terminal back to Cashier Shift"
                             >
-                                <LogOut className="w-3.5 h-3.5 text-slate-400" />
-                                <span className="hidden md:inline">Lock to Cashier</span>
+                                <LogOut className="w-3.5 h-3.5 flex-shrink-0" />
+                                <span className="hidden lg:inline">Lock to Cashier</span>
+                                <span className="text-[10px] lg:hidden">Lock</span>
                             </button>
                         </div>
                     ) : (
                         <button
+                            type="button"
                             onClick={() => {
                                 setPinError(null);
                                 setIsAuthModalOpen(true);
                             }}
-                            className="px-2.5 py-1.5 rounded-xl border bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-800 flex items-center space-x-1.5 text-xs font-bold transition active:bg-slate-700"
+                            className="mt-4 px-2.5 py-1.5 rounded-xl border bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-800 flex items-center space-x-1.5 whitespace-nowrap text-xs font-bold transition active:bg-slate-700"
                         >
-                            <User className="w-3.5 h-3.5 text-slate-400" />
+                            <User className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                             <span>Shift Cashier</span>
-                            <span className="text-[10px] text-sky-400 ml-0.5 font-normal">(Unlock)</span>
+                            <span className="text-[10px] text-sky-400 font-normal">(Unlock)</span>
                         </button>
                     )}
                 </div>
             </header>
 
-            {/* Mobile Bottom Dock Navigation Bar */}
-            <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 border-t border-slate-800 backdrop-blur px-2 py-1 flex justify-around items-center">
-                {links.map((link) => {
-                    const Icon = link.icon;
-                    const isActive = pathname === link.href;
-                    const isLockedForCashier = !isOwner && link.protected;
+            {/* 2. Mobile Bottom Dock (Strictly hidden on md+ screens, fixed to screen bottom on mobile) */}
+            <nav aria-label="Mobile navigation" className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-800 bg-slate-900 md:hidden">
+                <div className="flex justify-around items-center px-2 py-1">
+                    {links.map((link) => {
+                        const Icon = link.icon;
+                        const isActive = pathname === link.href;
+                        const isLockedForCashier = !isOwner && link.protected;
 
-                    return (
-                        <Link
-                            key={link.href}
-                            href={link.href}
-                            className={`flex-1 py-1 flex flex-col items-center justify-center rounded-xl transition ${
-                                isActive
-                                    ? 'text-sky-400 font-bold'
-                                    : isLockedForCashier
-                                        ? 'text-slate-500'
-                                        : 'text-slate-400 hover:text-slate-200'
-                            }`}
-                        >
-                            <div className="relative">
-                                <Icon className="w-4 h-4" />
-                                {isLockedForCashier && (
-                                    <Lock className="w-2.5 h-2.5 text-slate-500 absolute -top-1 -right-2" />
-                                )}
-                            </div>
-                            <span className="text-[10px] mt-0.5">{link.label}</span>
-                        </Link>
-                    );
-                })}
+                        return (
+                            <Link
+                                key={link.href}
+                                href={link.href}
+                                className={`flex-1 py-1 flex flex-col items-center justify-center rounded-xl transition ${
+                                    isActive
+                                        ? 'text-sky-400 font-bold'
+                                        : isLockedForCashier
+                                            ? 'text-slate-500'
+                                            : 'text-slate-400 hover:text-slate-200'
+                                }`}
+                            >
+                                <div className="relative">
+                                    <Icon className="w-4 h-4" />
+                                    {isLockedForCashier && (
+                                        <Lock className="w-2.5 h-2.5 text-slate-500 absolute -top-1 -right-2" />
+                                    )}
+                                </div>
+                                <span className="text-[10px] mt-0.5">{link.label}</span>
+                            </Link>
+                        );
+                    })}
+                </div>
             </nav>
 
-            {/* Switch Shift / PIN Modal */}
+            {/* 3. Switch Shift / PIN Modal */}
             {isAuthModalOpen && (
                 <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                     <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative">
                         <button
+                            type="button"
                             onClick={() => {
                                 setIsAuthModalOpen(false);
                                 setPinError(null);
@@ -165,7 +176,7 @@ export function Navbar({ storeName }: NavbarProps) {
 
                         <PinPad
                             title="Enter Owner PIN"
-                            subtitle="Enter Owner Master PIN (9999) to unlock financial & pricing tools"
+                            subtitle="Enter 4-digit security PIN to unlock owner controls"
                             errorMessage={pinError}
                             onComplete={async (pin) => {
                                 const res = await loginWithPin(pin);
@@ -174,7 +185,7 @@ export function Navbar({ storeName }: NavbarProps) {
                                     setPinError(null);
                                     return true;
                                 }
-                                setPinError('Invalid Owner PIN. Enter 9999 to unlock.');
+                                setPinError('Invalid Owner PIN. Please try again.');
                                 return false;
                             }}
                         />

@@ -7,15 +7,12 @@ import { Navbar } from '@/components/layout/Navbar';
 import { formatPHP } from '@/lib/formatters';
 import {
     FileSpreadsheet,
-    Banknote,
-    Smartphone,
     MinusCircle,
     PlusCircle,
     AlertCircle,
     CheckCircle2,
     Printer,
     Calendar,
-    Layers,
 } from 'lucide-react';
 
 export function AuditView() {
@@ -58,7 +55,7 @@ export function AuditView() {
                         </div>
                         <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1 font-mono">
                             <Calendar className="w-3.5 h-3.5" />
-                            Manila Shift: {manilaDateStr} • {metrics.totalOrdersCount} Total Tickets
+                            <span>Manila Shift: {manilaDateStr} • {metrics.totalOrdersCount} Total Tickets</span>
                         </p>
                     </div>
 
@@ -202,7 +199,7 @@ export function AuditView() {
                     <div className="flex justify-between items-center">
                         <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
                             <MinusCircle className="w-4 h-4 text-rose-400" />
-                            Today's Itemized Store Expenses ({metrics.expenses.length})
+                            Today&apos;s Itemized Store Expenses ({metrics.expenses.length})
                         </h4>
                         <span className="text-xs font-mono font-bold text-rose-400">
               Total: -{formatPHP(metrics.totalExpenses)}
@@ -220,12 +217,17 @@ export function AuditView() {
                                     <div>
                                         <div className="flex items-center space-x-2">
                       <span className="px-2 py-0.5 rounded bg-slate-800 text-[10px] uppercase font-bold text-slate-300">
-                        {exp.category.replace('_', ' ')}
+                        {exp.category.replace(/_/g, ' ')}
                       </span>
                                             <span className="text-slate-200 font-medium">{exp.description}</span>
                                         </div>
                                         <span className="text-[10px] text-slate-500 font-mono mt-0.5 block">
-                      {new Date(exp.created_at).toLocaleTimeString('en-US', { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit' })} • Recorded by {exp.recorded_by}
+                      {new Date(exp.created_at).toLocaleTimeString('en-US', {
+                          timeZone: 'Asia/Manila',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                      })}{' '}
+                                            • Recorded by {exp.recorded_by}
                     </span>
                                     </div>
 
@@ -238,6 +240,13 @@ export function AuditView() {
                     )}
                 </div>
             </main>
+
+            {/* Fixed Non-Editable App Footer */}
+            <footer className="py-6 pb-20 md:pb-8 text-center border-t border-slate-900 mt-8 select-none">
+                <p className="text-[11px] text-slate-600 font-mono tracking-wider">
+                    Rinset 2026 by tijnara
+                </p>
+            </footer>
 
             {/* 58mm Thermal Printable Z-Reading Slip */}
             <div className="hidden print:block w-[58mm] bg-white text-black p-3 font-mono text-[10px] leading-tight mx-auto">
@@ -310,7 +319,7 @@ export function AuditView() {
                 <div className="pt-3 text-[8px] space-y-3">
                     <p>Cashier On Duty: ___________________</p>
                     <p>Store Owner Signature: _____________</p>
-                    <p className="text-center text-gray-500">Powered by Rinset</p>
+                    <p className="text-center text-gray-500">Rinset 2026 by tijnara</p>
                 </div>
             </div>
 

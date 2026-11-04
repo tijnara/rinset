@@ -16,9 +16,11 @@ interface AuthState {
     user: AuthUser | null;
     isAuthenticated: boolean;
     isHydrated: boolean;
+    ownerPin: string;
     setHydrated: () => void;
     loginWithPin: (pin: string) => Promise<{ success: boolean; role?: UserRole; error?: string }>;
     verifyOwnerPin: (pin: string) => Promise<{ success: boolean; error?: string }>;
+    changeOwnerPin: (currentPin: string, newPin: string) => Promise<{ success: boolean; error?: string }>;
     lockToCashier: () => void;
     logout: () => void;
 }
@@ -29,10 +31,13 @@ export const useAuthStore = create<AuthState>()(
             user: { id: 'cashier-default', name: 'Shift Cashier', role: 'cashier' },
             isAuthenticated: true,
             isHydrated: false,
+            ownerPin: '9999',
 
             setHydrated: () => set({ isHydrated: true }),
 
             loginWithPin: async (pin: string) => {
+                const activeOwnerPin = get().ownerPin || '9999';
+
                 try {
                     const supabase = createClient();
 
@@ -58,13 +63,14 @@ export const useAuthStore = create<AuthState>()(
                     // Fall through to offline credentials
                 }
 
-                // 2. Built-in hardcoded PIN credentials
-                if (pin === '9999') {
+                // 2. Match against active Owner PIN (custom or default)
+                if (pin === activeOwnerPin) {
                     const user: AuthUser = { id: 'owner-master', name: 'Store Owner', role: 'owner' };
                     set({ user, isAuthenticated: true });
                     return { success: true, role: 'owner' };
                 }
 
+                // 3. Match against default Cashier PIN
                 if (pin === '1234') {
                     const user: AuthUser = { id: 'cashier-shift', name: 'Shift Cashier', role: 'cashier' };
                     set({ user, isAuthenticated: true });
@@ -85,10 +91,42 @@ export const useAuthStore = create<AuthState>()(
                 if (res.role !== 'owner') {
                     return {
                         success: false,
-                        error: 'Access Denied: Cashier PIN (1234) cannot unlock Owner controls.',
+                        error: 'Access Denied: Owner authorization required.',
                     };
                 }
 
+                return { success: true };
+            },
+
+            changeOwnerPin: async (currentPin: string, newPin: string) => {
+                const activeOwnerPin = get().ownerPin || '9999';
+
+                if (currentPin !== activeOwnerPin) {
+                    return { success: false, error: 'Current PIN is incorrect.' };
+                }
+
+                if (!/^\d{4}$/.test(newPin)) {
+                    return { success: false, error: 'New PIN must be exactly 4 digits (0-9).' };
+                }
+
+                if (newPin === currentPin) {
+                    return { success: false, error: 'New PIN must be different from current PIN.' };
+                }
+
+                try {
+                    const supabase = createClient();
+                    const { user } = get();
+                    if (user?.id && user.id !== 'owner-master') {
+                        await supabase
+                            .from('profiles')
+                            .update({ pin_code: newPin })
+                            .eq('id', user.id);
+                    }
+                } catch {
+                    // Handled via local persistent state
+                }
+
+                set({ ownerPin: newPin });
                 return { success: true };
             },
 

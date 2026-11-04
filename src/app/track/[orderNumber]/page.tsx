@@ -1,4 +1,3 @@
-// C:\Users\UserT\WebstormProjects\rinset\src\app\track\[orderNumber]\page.tsx
 'use client';
 
 import { Suspense, useEffect, useState, useMemo } from 'react';
@@ -25,7 +24,6 @@ interface ExtendedOrder extends Order {
     baskets?: OrderBasket[];
 }
 
-// Stage configuration with proper Tagalog terminology
 const STAGES: {
     key: OrderStatus;
     title: string;
@@ -581,14 +579,14 @@ function TrackingView() {
                     )}
                 </section>
 
-                {/* English Live Connection Footer */}
+                {/* English Live Connection Footer with Fixed Brand */}
                 <footer className="text-center space-y-2 pt-2 pb-8">
                     <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-[10px] text-slate-400">
                         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                         <span>Live updates enabled • Screen updates automatically</span>
                     </div>
                     <p className="text-[10px] text-slate-600 font-mono">
-                        Powered by Rinset POS • Laundry Operating System
+                        Rinset 2026 by tijnara
                     </p>
                 </footer>
             </main>

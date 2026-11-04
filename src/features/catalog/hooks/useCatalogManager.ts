@@ -33,6 +33,32 @@ export function useCatalogManager() {
         fetchItems();
     }, [fetchItems]);
 
+    const updateStoreName = async (newName: string) => {
+        const cleanName = newName.trim();
+        if (!cleanName) {
+            return { success: false, error: 'Business name cannot be empty.' };
+        }
+
+        try {
+            const { error } = await supabase
+                .from('stores')
+                .update({ name: cleanName })
+                .eq('id', storeId);
+
+            if (error) {
+                return { success: false, error: error.message };
+            }
+
+            setStoreName(cleanName);
+            return { success: true };
+        } catch (err: unknown) {
+            return {
+                success: false,
+                error: err instanceof Error ? err.message : 'Failed to update business name.',
+            };
+        }
+    };
+
     const saveItem = async (item: Partial<CatalogItem>) => {
         if (item.id) {
             await supabase.from('catalog_items').update(item).eq('id', item.id);
@@ -60,7 +86,9 @@ export function useCatalogManager() {
     return {
         items,
         storeName,
+        storeId,
         isLoading,
+        updateStoreName,
         saveItem,
         deleteItem,
         toggleActiveStatus,

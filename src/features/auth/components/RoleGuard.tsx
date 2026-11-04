@@ -50,7 +50,7 @@ export function RoleGuard({
             return true;
         }
 
-        setErrorMessage(res.error || 'Access Denied. Only Store Owner (PIN 9999) can enter.');
+        setErrorMessage(res.error || 'Access Denied: Incorrect Owner PIN.');
         return false;
     };
 
@@ -69,12 +69,6 @@ export function RoleGuard({
                     onComplete={handleVerify}
                     onCancel={() => router.push('/')}
                 />
-
-                <div className="mt-4 pt-4 border-t border-slate-800 text-center">
-                    <p className="text-[11px] text-slate-500">
-                        Owner Master PIN: <strong className="text-amber-400 font-mono">9999</strong> (Cashier PIN 1234 is blocked)
-                    </p>
-                </div>
             </div>
         </div>
     );

@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { useCatalogManager } from './hooks/useCatalogManager';
 import { CatalogItemModal } from './components/CatalogItemModal';
+import { ChangePinModal } from './components/ChangePinModal';
+import { EditStoreNameModal } from './components/EditStoreNameModal';
 import { CatalogItem } from '@/types/database';
 import { formatPHP } from '@/lib/formatters';
 import { Navbar } from '@/components/layout/Navbar';
@@ -16,14 +18,19 @@ import {
     Lock,
     Shield,
     Unlock,
+    KeyRound,
+    Store,
     X,
 } from 'lucide-react';
 
 export function CatalogManagerView() {
-    const { items, storeName, saveItem, deleteItem, toggleActiveStatus } = useCatalogManager();
+    const { items, storeName, updateStoreName, saveItem, deleteItem, toggleActiveStatus } =
+        useCatalogManager();
     const { user, loginWithPin } = useAuthStore();
     const [selectedItem, setSelectedItem] = useState<CatalogItem | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isChangePinOpen, setIsChangePinOpen] = useState(false);
+    const [isEditStoreOpen, setIsEditStoreOpen] = useState(false);
     const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
     const [unlockError, setUnlockError] = useState<string | null>(null);
 
@@ -40,10 +47,9 @@ export function CatalogManagerView() {
                         <div className="flex items-center gap-2">
                             <h2 className="text-lg font-bold text-white flex items-center gap-2">
                                 <Settings className="w-5 h-5 text-sky-400" />
-                                Service Rates & Retail Catalog
+                                Service Rates & Store Settings
                             </h2>
 
-                            {/* Status Badge */}
                             {isOwner ? (
                                 <span className="px-2.5 py-0.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] font-bold rounded-full flex items-center gap-1">
                   <Shield className="w-3 h-3" />
@@ -58,25 +64,47 @@ export function CatalogManagerView() {
                         </div>
                         <p className="text-xs text-slate-400 mt-0.5">
                             {isOwner
-                                ? 'Configure per-kilo rates, retail items, and load minimum floors.'
+                                ? 'Configure business branding, owner security PIN, per-kilo rates, and retail stock.'
                                 : 'Rates are locked. Cashiers can view prices for customer inquiries.'}
                         </p>
                     </div>
 
-                    {/* Action Buttons: Add Item (Owner) vs Unlock (Cashier) */}
+                    {/* Action Buttons: Owner Controls vs Cashier Unlock */}
                     {isOwner ? (
-                        <button
-                            onClick={() => {
-                                setSelectedItem(null);
-                                setIsModalOpen(true);
-                            }}
-                            className="h-10 px-4 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs rounded-xl flex items-center gap-1.5 transition shadow"
-                        >
-                            <Plus className="w-4 h-4 stroke-[2.5]" />
-                            <span>Add Item</span>
-                        </button>
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <button
+                                type="button"
+                                onClick={() => setIsEditStoreOpen(true)}
+                                className="h-10 px-3.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs rounded-xl flex items-center gap-1.5 transition active:scale-95 shadow-sm"
+                            >
+                                <Store className="w-3.5 h-3.5 text-sky-400" />
+                                <span>Change Business Name</span>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => setIsChangePinOpen(true)}
+                                className="h-10 px-3.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs rounded-xl flex items-center gap-1.5 transition active:scale-95 shadow-sm"
+                            >
+                                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                                <span>Change Owner PIN</span>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setSelectedItem(null);
+                                    setIsModalOpen(true);
+                                }}
+                                className="h-10 px-4 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs rounded-xl flex items-center gap-1.5 transition shadow"
+                            >
+                                <Plus className="w-4 h-4 stroke-[2.5]" />
+                                <span>Add Item</span>
+                            </button>
+                        </div>
                     ) : (
                         <button
+                            type="button"
                             onClick={() => {
                                 setUnlockError(null);
                                 setIsUnlockModalOpen(true);
@@ -125,10 +153,10 @@ export function CatalogManagerView() {
                                 </p>
                             </div>
 
-                            {/* Action Buttons: ONLY RENDERED FOR OWNER */}
                             {isOwner ? (
                                 <div className="flex items-center gap-2">
                                     <button
+                                        type="button"
                                         onClick={() => toggleActiveStatus(item.id, item.is_active)}
                                         className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
                                         title={item.is_active ? 'Deactivate' : 'Activate'}
@@ -141,6 +169,7 @@ export function CatalogManagerView() {
                                     </button>
 
                                     <button
+                                        type="button"
                                         onClick={() => {
                                             setSelectedItem(item);
                                             setIsModalOpen(true);
@@ -152,7 +181,6 @@ export function CatalogManagerView() {
                                     </button>
                                 </div>
                             ) : (
-                                /* Locked badge for Cashier */
                                 <div className="p-2 text-slate-600" title="Locked - Owner permission required to edit">
                                     <Lock className="w-4 h-4" />
                                 </div>
@@ -162,7 +190,7 @@ export function CatalogManagerView() {
                 </div>
             </main>
 
-            {/* Edit / Add Modal (Only accessible by Owner) */}
+            {/* Edit / Add Item Modal */}
             {isOwner && (
                 <CatalogItemModal
                     item={selectedItem}
@@ -173,11 +201,30 @@ export function CatalogManagerView() {
                 />
             )}
 
+            {/* Change Owner PIN Modal */}
+            {isOwner && (
+                <ChangePinModal
+                    isOpen={isChangePinOpen}
+                    onClose={() => setIsChangePinOpen(false)}
+                />
+            )}
+
+            {/* Change Business Name Modal */}
+            {isOwner && (
+                <EditStoreNameModal
+                    isOpen={isEditStoreOpen}
+                    onClose={() => setIsEditStoreOpen(false)}
+                    currentStoreName={storeName}
+                    onSave={updateStoreName}
+                />
+            )}
+
             {/* PIN Unlock Modal for Cashiers */}
             {isUnlockModalOpen && (
                 <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                     <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative">
                         <button
+                            type="button"
                             onClick={() => {
                                 setIsUnlockModalOpen(false);
                                 setUnlockError(null);
@@ -189,7 +236,7 @@ export function CatalogManagerView() {
 
                         <PinPad
                             title="Enter Owner PIN"
-                            subtitle="Enter Owner Master PIN (9999) to edit rates"
+                            subtitle="Enter 4-digit security PIN to edit rates"
                             errorMessage={unlockError}
                             onComplete={async (pin) => {
                                 const res = await loginWithPin(pin);
@@ -198,13 +245,20 @@ export function CatalogManagerView() {
                                     setUnlockError(null);
                                     return true;
                                 }
-                                setUnlockError('Access Denied. Only Store Owner (PIN 9999) can edit rates.');
+                                setUnlockError('Access Denied: Incorrect Owner PIN.');
                                 return false;
                             }}
                         />
                     </div>
                 </div>
             )}
+
+            {/* Fixed Non-Editable App Footer */}
+            <footer className="py-6 pb-20 md:pb-8 text-center border-t border-slate-900 mt-10 select-none">
+                <p className="text-[11px] text-slate-600 font-mono tracking-wider">
+                    Rinset 2026 by tijnara
+                </p>
+            </footer>
         </div>
     );
 }

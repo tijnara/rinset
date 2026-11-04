@@ -13,8 +13,7 @@ import { CheckoutModal } from '@/features/pos/components/CheckoutModal';
 import { ReceiptModal } from '@/features/pos/components/ReceiptModal';
 import { CashOutModal } from '@/features/audit/components/CashOutModal';
 import { Navbar } from '@/components/layout/Navbar';
-import { formatPHP } from '@/lib/formatters';
-import { ShoppingBag, CheckCircle2, MinusCircle } from 'lucide-react';
+import { CheckCircle2, MinusCircle } from 'lucide-react';
 
 export function POSView() {
     const {
@@ -26,9 +25,7 @@ export function POSView() {
         storeId,
     } = useCatalog();
 
-    // Directly subscribe to items & breakdown
-    const { items, addItem, getBreakdown } = useCartStore();
-    const breakdown = getBreakdown();
+    const { addItem } = useCartStore();
     const { logExpense } = useAudit();
 
     const [activeWeightItem, setActiveWeightItem] = useState<CatalogItem | null>(null);
@@ -46,68 +43,27 @@ export function POSView() {
         }
     };
 
-    const totalItemCount = items.reduce(
-        (acc, curr) => acc + (curr.pricingType === 'per_kilo' ? 1 : curr.quantity),
-        0
-    );
-
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none pb-16 md:pb-0">
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none pb-20 md:pb-0">
             <Navbar storeName={storeName} />
 
             <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
                 {/* Catalog Panel */}
                 <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-                    {/* Top Quick Actions Bar with Permanent Cart Trigger */}
-                    <div className="px-3 sm:px-4 py-2 bg-slate-900/60 border-b border-slate-800 flex justify-between items-center flex-shrink-0">
+                    <div className="px-3 sm:px-4 py-2 bg-slate-900/40 border-b border-slate-800 flex justify-between items-center flex-shrink-0">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
               Service & Retail Menu
             </span>
-
-                        <div className="flex items-center space-x-2">
-                            {/* Clickable Mobile Cart Icon with Live Badge */}
-                            <button
-                                type="button"
-                                onClick={() => setIsMobileCartOpen(true)}
-                                className={`lg:hidden h-8 px-3 rounded-xl border flex items-center space-x-1.5 transition active:scale-95 ${
-                                    items.length > 0
-                                        ? 'bg-sky-500/20 border-sky-400/50 text-sky-300 font-bold shadow-sm'
-                                        : 'bg-slate-800/80 border-slate-700 text-slate-400'
-                                }`}
-                                title="View Active Ticket"
-                            >
-                                <ShoppingBag className="w-3.5 h-3.5 text-sky-400" />
-                                <span className="text-xs">Ticket</span>
-                                <span
-                                    className={`px-1.5 py-0.2 rounded-full font-mono text-[10px] font-black ${
-                                        items.length > 0
-                                            ? 'bg-sky-500 text-slate-950'
-                                            : 'bg-slate-700 text-slate-300'
-                                    }`}
-                                >
-                  {totalItemCount}
-                </span>
-                                {items.length > 0 && (
-                                    <span className="text-xs font-mono font-bold text-white ml-0.5">
-                    {formatPHP(breakdown.netPayable)}
-                  </span>
-                                )}
-                            </button>
-
-                            {/* Petty Cash Out */}
-                            <button
-                                type="button"
-                                onClick={() => setIsCashOutOpen(true)}
-                                className="h-8 px-2.5 sm:px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 active:bg-rose-600 active:text-white border border-rose-500/20 text-rose-400 font-bold text-xs flex items-center space-x-1.5 transition"
-                            >
-                                <MinusCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                                <span className="hidden sm:inline">Quick Cash Out</span>
-                                <span className="sm:hidden">Cash Out</span>
-                            </button>
-                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setIsCashOutOpen(true)}
+                            className="h-8 px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 active:bg-rose-600 active:text-white border border-rose-500/20 text-rose-400 font-bold text-xs flex items-center space-x-1.5 transition"
+                        >
+                            <MinusCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span>Quick Cash Out</span>
+                        </button>
                     </div>
 
-                    {/* Catalog Grid */}
                     <CatalogGrid
                         items={catalog}
                         categories={categories}
@@ -117,9 +73,10 @@ export function POSView() {
                     />
                 </div>
 
-                {/* Cart Drawer (Desktop persistent, Mobile full drawer) */}
+                {/* Cart Sidebar */}
                 <CartSidebar
                     isOpenOnMobile={isMobileCartOpen}
+                    onOpenMobile={() => setIsMobileCartOpen(true)}
                     onCloseMobile={() => setIsMobileCartOpen(false)}
                     onProceedCheckout={() => {
                         setIsMobileCartOpen(false);

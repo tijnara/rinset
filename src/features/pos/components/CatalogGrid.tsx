@@ -19,7 +19,7 @@ export function CatalogGrid({
                                 onItemSelect,
                             }: CatalogGridProps) {
     return (
-        <div className="flex-1 flex flex-col overflow-y-auto p-4 md:p-6 pb-28 lg:pb-6">
+        <div className="flex-1 flex flex-col overflow-y-auto p-4 md:p-6 pb-40 md:pb-32 lg:pb-6">
             {/* Category Tabs */}
             <div className="flex items-center space-x-2 overflow-x-auto pb-3 mb-2 scrollbar-none">
                 {categories.map((cat) => (
