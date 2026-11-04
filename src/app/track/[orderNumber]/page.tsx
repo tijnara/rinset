@@ -24,10 +24,11 @@ interface ExtendedOrder extends Order {
     baskets?: OrderBasket[];
 }
 
-// Stage configuration with Filipino shop humor and status mapping
+// Stage configuration with proper Tagalog terminology
 const STAGES: {
     key: OrderStatus;
     title: string;
+    shortLabel: string;
     tagline: string;
     subtext: string;
     emoji: string;
@@ -36,52 +37,56 @@ const STAGES: {
 }[] = [
     {
         key: 'received',
-        title: 'Nasa Pila Pa',
-        tagline: 'Pila muna bago kuskos!',
-        subtext: 'Nakatambay pa sa safe basket. Hinahanda na ang sabon at fabcon!',
+        title: 'Nasa Pila',
+        shortLabel: 'Pila',
+        tagline: 'Nakatala na at inihahanda para labhan',
+        subtext: 'Ligtas na nakalagay sa basket at inihahanda na ang angkop na sabon at panlambot.',
         emoji: '🧺',
         color: 'text-amber-400',
         accentBg: 'bg-amber-500/10 border-amber-500/30',
     },
     {
         key: 'washing',
-        title: 'Labado Mode On',
-        tagline: 'Todo ikot para tanggal ang pawis!',
-        subtext: 'Bumabagyo ng bula sa loob ng drum. Bawal istorbohin ang sabon!',
+        title: 'Kasalukuyang Nilalabhan',
+        shortLabel: 'Nilalabhan',
+        tagline: 'Isinasailalim sa masusing paghuhugas',
+        subtext: 'Matiyagang pinaiikot at nililinis gamit ang de-kalidad na sabon at tubig.',
         emoji: '🫧',
         color: 'text-sky-400',
         accentBg: 'bg-sky-500/10 border-sky-500/30',
     },
     {
         key: 'drying',
-        title: 'Tumble Dry Sarap',
-        tagline: 'Mainit-init at amoy bagong bili!',
-        subtext: 'Pina-iikot sa mainit na dryer para tuyong-tuyo at walang amoy kulob.',
+        title: 'Pinatutuyo',
+        shortLabel: 'Pinatutuyo',
+        tagline: 'Pinaiikot sa mainit na dryer',
+        subtext: 'Sumasailalim sa tamang init upang masigurong tuyong-tuyo at walang amoy-kulob.',
         emoji: '🔥',
         color: 'text-orange-400',
         accentBg: 'bg-orange-500/10 border-orange-500/30',
     },
     {
         key: 'ready_for_pickup',
-        title: 'Tiklop na & Ready!',
-        tagline: 'Mabango, fresh, at ready i-claim!',
-        subtext: 'Naitiklop na nang maayos ni Ate at nakaplastik na sa cubby shelf.',
+        title: 'Handa Nang Kunin',
+        shortLabel: 'Handa Na',
+        tagline: 'Malinis, mabango, at nakatupi na',
+        subtext: 'Maayos nang naitiklop at nakalagay na sa nakalaang storage slot para sa inyo.',
         emoji: '✨',
         color: 'text-emerald-400',
         accentBg: 'bg-emerald-500/10 border-emerald-500/30',
     },
     {
         key: 'claimed',
-        title: 'Na-Claim Na!',
-        tagline: 'Salamat sa tiwala!',
-        subtext: 'Nasa mabuting kamay na ang iyong damit. Hanggang sa susunod na laba!',
+        title: 'Nakuha Na',
+        shortLabel: 'Nakuha',
+        tagline: 'Matagumpay nang na-claim ang labada',
+        subtext: 'Maraming salamat po sa inyong pagtitiwala! Hanggang sa muling paglalaba.',
         emoji: '💖',
         color: 'text-slate-400',
         accentBg: 'bg-slate-800/40 border-slate-700',
     },
 ];
 
-// Complete mapping for all keys in OrderStatus union
 const STAGE_ORDER: Record<OrderStatus, number> = {
     received: 1,
     washing: 2,
@@ -102,7 +107,6 @@ function TrackingView() {
     const [notFound, setNotFound] = useState(false);
     const [copied, setCopied] = useState(false);
 
-    // Synchronize Order & Baskets
     const fetchOrder = async (isBackground = false) => {
         if (!orderNumber) return;
         try {
@@ -133,7 +137,6 @@ function TrackingView() {
     useEffect(() => {
         fetchOrder();
 
-        // 1. Supabase Realtime Listener (Instant pushes)
         const supabase = createClient();
         const channel = supabase
             .channel(`track-${orderNumber}`)
@@ -149,7 +152,6 @@ function TrackingView() {
             )
             .subscribe();
 
-        // 2. Fallback Polling (Every 4 seconds for spotty mobile networks)
         const interval = setInterval(() => {
             fetchOrder(true);
         }, 4000);
@@ -160,7 +162,6 @@ function TrackingView() {
         };
     }, [orderNumber]);
 
-    // Derive highest stage from baskets or parent order
     const currentStage: OrderStatus = useMemo(() => {
         if (!order) return 'received';
 
@@ -194,7 +195,6 @@ function TrackingView() {
         return order.status || 'received';
     }, [order]);
 
-    // Find active machine (e.g. W-02, D-01)
     const activeMachine = useMemo(() => {
         if (!order?.baskets) return null;
         const basketWithMachine = order.baskets.find(
@@ -214,8 +214,8 @@ function TrackingView() {
                     <div className="absolute inset-2 rounded-full border-4 border-indigo-500/20 border-b-indigo-400 animate-spin [animation-direction:reverse]" />
                     <div className="absolute inset-0 flex items-center justify-center text-xl">🧺</div>
                 </div>
-                <p className="text-slate-300 font-bold text-sm">Hinahanap ang labada mo...</p>
-                <p className="text-slate-500 text-xs font-mono mt-1">Connecting to Rinset Live Board</p>
+                <p className="text-slate-300 font-bold text-sm">Hinahanap ang inyong talaan...</p>
+                <p className="text-slate-500 text-xs font-mono mt-1">Kumokonekta sa Rinset Live Board</p>
             </div>
         );
     }
@@ -228,9 +228,9 @@ function TrackingView() {
                         <FileQuestion className="w-7 h-7" />
                     </div>
                     <div>
-                        <h1 className="text-lg font-bold text-white">Ticket Not Found</h1>
+                        <h1 className="text-lg font-bold text-white">Hindi Nahanap ang Tiket</h1>
                         <p className="text-slate-400 text-xs mt-1 leading-relaxed">
-                            Walang record para sa Ticket <strong className="text-sky-400 font-mono">#{orderNumber}</strong>. Pakitsek kung tama ang QR code o link sa resibo.
+                            Walang tala para sa Tiket <strong className="text-sky-400 font-mono">#{orderNumber}</strong>. Pakisuring muli ang QR code o link sa inyong resibo.
                         </p>
                     </div>
                 </div>
@@ -246,9 +246,9 @@ function TrackingView() {
                         <XCircle className="w-7 h-7" />
                     </div>
                     <div>
-                        <h1 className="text-lg font-bold text-white">Order Cancelled</h1>
+                        <h1 className="text-lg font-bold text-white">Kinansela ang Tiket</h1>
                         <p className="text-slate-400 text-xs mt-1 leading-relaxed">
-                            Ang Ticket <strong className="text-rose-400 font-mono">#{order.order_number}</strong> ay kinansela. Makipag-ugnayan sa shop kung may katanungan.
+                            Ang Tiket <strong className="text-rose-400 font-mono">#{order.order_number}</strong> ay kinansela na. Mangyaring makipag-ugnayan sa shop para sa karagdagang impormasyon.
                         </p>
                     </div>
                 </div>
@@ -260,7 +260,6 @@ function TrackingView() {
     const isReady = currentStage === 'ready_for_pickup' || currentStage === 'claimed';
     const isClaimed = currentStage === 'claimed';
 
-    // Overdue penalties (14+ days)
     const daysOld = Math.floor(
         (Date.now() - new Date(order.created_at).getTime()) / (1000 * 60 * 60 * 24)
     );
@@ -271,8 +270,8 @@ function TrackingView() {
         if (navigator.share) {
             navigator
                 .share({
-                    title: `${storeName} - Ticket #${order.order_number}`,
-                    text: `Track my laundry at ${storeName}! Status: ${stageMeta.title}`,
+                    title: `${storeName} - Tiket #${order.order_number}`,
+                    text: `Subaybayan ang aking labada sa ${storeName}! Katayuan: ${stageMeta.title}`,
                     url: window.location.href,
                 })
                 .catch(() => {});
@@ -285,7 +284,7 @@ function TrackingView() {
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-100 p-3 sm:p-6 font-sans relative overflow-x-hidden selection:bg-sky-500 selection:text-slate-950">
-            {/* Background Animated Floating Soap Bubbles */}
+            {/* Floating Animated Soap Bubbles */}
             <div className="fixed inset-0 pointer-events-none overflow-hidden z-0 opacity-40">
                 <div className="bubble bubble-1" />
                 <div className="bubble bubble-2" />
@@ -304,7 +303,7 @@ function TrackingView() {
                         <div>
                             <h1 className="text-sm font-bold text-white leading-none">{storeName}</h1>
                             <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                                Ticket <span className="text-sky-400 font-bold">#{order.order_number}</span>
+                                Tiket <span className="text-sky-400 font-bold">#{order.order_number}</span>
                             </p>
                         </div>
                     </div>
@@ -312,27 +311,24 @@ function TrackingView() {
                     <button
                         onClick={handleShare}
                         className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 text-xs font-semibold flex items-center space-x-1.5 transition border border-slate-700"
-                        title="Share tracking link"
+                        title="Ibahagi ang tracking link"
                     >
                         {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Share2 className="w-3.5 h-3.5" />}
-                        <span className="text-[11px]">{copied ? 'Copied!' : 'Share'}</span>
+                        <span className="text-[11px]">{copied ? 'Nakopya!' : 'Ibahagi'}</span>
                     </button>
                 </header>
 
-                {/* 3D Animated Hero Stage Screen */}
+                {/* 3D Animated Hero Screen */}
                 <section
                     className={`p-5 rounded-3xl border shadow-2xl relative overflow-hidden transition-all duration-500 ${stageMeta.accentBg}`}
                 >
-                    {/* 3D Radial Background Glow */}
                     <div className="absolute -top-16 -right-16 w-44 h-44 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
                     <div className="absolute -bottom-16 -left-16 w-44 h-44 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
 
                     {/* Animated 3D Washing Machine Character */}
                     <div className="flex justify-center py-2">
                         <div className="relative group cursor-pointer">
-                            {/* Washing Machine Body */}
                             <div className="w-36 h-44 bg-gradient-to-b from-slate-800 via-slate-900 to-slate-950 rounded-3xl border-2 border-slate-700/80 shadow-[0_15px_35px_rgba(0,0,0,0.6)] flex flex-col items-center p-2.5 relative transform transition-transform duration-300 hover:rotate-1">
-                                {/* Control Panel */}
                                 <div className="w-full flex justify-between items-center px-1 mb-2">
                                     <div className="w-6 h-2 rounded bg-slate-700 border border-slate-600" />
                                     <div className="flex space-x-1">
@@ -344,11 +340,9 @@ function TrackingView() {
                                     </div>
                                 </div>
 
-                                {/* Porthole Door */}
                                 <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-slate-950 via-slate-900 to-slate-800 border-4 border-slate-700 shadow-inner flex items-center justify-center relative overflow-hidden">
                                     <div className="absolute inset-0 bg-gradient-to-br from-white/15 via-transparent to-transparent rounded-full pointer-events-none" />
 
-                                    {/* Stage Animations */}
                                     {currentStage === 'received' && (
                                         <div className="text-3xl animate-bounce [animation-duration:1.5s]">🧺</div>
                                     )}
@@ -380,7 +374,7 @@ function TrackingView() {
                                         <div className="flex flex-col items-center justify-center space-y-0.5 animate-bounce [animation-duration:2s]">
                                             <span className="text-2xl">✨</span>
                                             <span className="text-[10px] font-mono font-black text-emerald-400 uppercase tracking-tighter">
-                        READY!
+                        HANDA NA
                       </span>
                                         </div>
                                     )}
@@ -390,14 +384,12 @@ function TrackingView() {
                                     )}
                                 </div>
 
-                                {/* Feet */}
                                 <div className="w-full flex justify-between px-3 mt-auto">
                                     <div className="w-3 h-1.5 bg-slate-700 rounded-b" />
                                     <div className="w-3 h-1.5 bg-slate-700 rounded-b" />
                                 </div>
                             </div>
 
-                            {/* Active Drum Badge */}
                             {activeMachine && (
                                 <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-sky-500 text-slate-950 font-mono font-black text-[10px] uppercase shadow-lg border border-sky-300">
                                     Drum: {activeMachine}
@@ -406,7 +398,6 @@ function TrackingView() {
                         </div>
                     </div>
 
-                    {/* Status Message */}
                     <div className="text-center mt-3 space-y-1">
             <span
                 className={`inline-block px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${stageMeta.color} bg-slate-950/70 border border-slate-800`}
@@ -420,12 +411,12 @@ function TrackingView() {
                     </div>
                 </section>
 
-                {/* 5-Step Progress Bar */}
+                {/* Yugto ng Paglalaba Progress Section */}
                 <section className="bg-slate-900/80 backdrop-blur-md border border-slate-800 p-4 rounded-3xl space-y-3">
                     <div className="flex justify-between items-center text-xs font-bold text-slate-400 px-1">
-                        <span>Laundry Progress</span>
+                        <span>Yugto ng Paglalaba</span>
                         <span className="text-sky-400 font-mono">
-              {stageIndex >= 0 ? `${stageIndex + 1} of 5` : 'Processing'}
+              {stageIndex >= 0 ? `Hakbang ${stageIndex + 1} sa 5` : 'Ipinoproseso'}
             </span>
                     </div>
 
@@ -456,7 +447,7 @@ function TrackingView() {
                                         {isPast ? <Check className="w-3.5 h-3.5 stroke-[3]" /> : idx + 1}
                                     </div>
                                     <span
-                                        className={`text-[9px] font-semibold truncate max-w-[55px] text-center ${
+                                        className={`text-[9px] font-semibold truncate max-w-[58px] text-center ${
                                             isCurrent
                                                 ? 'text-sky-400 font-bold'
                                                 : isPast
@@ -464,7 +455,7 @@ function TrackingView() {
                                                     : 'text-slate-600'
                                         }`}
                                     >
-                    {s.title.split(' ')[0]}
+                    {s.shortLabel}
                   </span>
                                 </div>
                             );
@@ -481,17 +472,17 @@ function TrackingView() {
                             </div>
                             <div>
                                 <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                                    Pickup Slot / Cubby
+                                    Lalagyan / Cubby Slot
                                 </p>
                                 <p className="text-base font-black text-emerald-300 font-mono">
                                     {order.storage_location}
                                 </p>
-                                <p className="text-[10px] text-slate-400">Sabihin lang kay Ate sa counter pagdating!</p>
+                                <p className="text-[10px] text-slate-400">Sabihin po lamang ang slot na ito sa counter pagdating.</p>
                             </div>
                         </div>
                         <div className="text-right">
               <span className="px-2 py-1 bg-emerald-500/20 text-emerald-300 text-[10px] font-bold rounded-lg border border-emerald-500/30">
-                Ready for Pickup
+                Handa Nang Kunin
               </span>
                         </div>
                     </section>
@@ -505,13 +496,13 @@ function TrackingView() {
                         </div>
                         <div className="flex-1 min-w-0">
                             <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                                Rider Delivery Dispatch
+                                Paghahatid ng Rider (Delivery)
                             </p>
                             <p className="text-xs font-semibold text-white mt-0.5 leading-snug">
                                 {order.delivery_address}
                             </p>
                             <p className="text-[10px] text-indigo-300 mt-1">
-                                Ihahatid sa bahay pagkatapos tiklupin. Ihanda ang pambayad sa rider!
+                                Ihahatid sa inyong tirahan matapos tiklupin. Pakihanda po ang bayad para sa rider.
                             </p>
                         </div>
                     </section>
@@ -522,7 +513,7 @@ function TrackingView() {
                     <section className="bg-slate-900/60 border border-amber-900/40 p-4 rounded-3xl space-y-2">
                         <div className="flex items-center space-x-1.5 text-xs font-bold text-amber-400">
                             <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                            <span>Noted Conditions (Bago Labhan):</span>
+                            <span>Mga Naitalang Kondisyon Bago Labhan:</span>
                         </div>
                         <ul className="text-xs text-slate-300 space-y-1 pl-2">
                             {order.special_notes.map((note, idx) => (
@@ -539,7 +530,7 @@ function TrackingView() {
                 <section className="bg-slate-900/80 backdrop-blur-md border border-slate-800 p-4 rounded-3xl space-y-3">
                     <div className="flex justify-between items-center border-b border-slate-800 pb-2.5">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-              Payment Status
+              Katayuan ng Bayad
             </span>
                         <span
                             className={`text-[10px] uppercase font-black px-2.5 py-1 rounded-xl border ${
@@ -548,7 +539,7 @@ function TrackingView() {
                                     : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
                             }`}
                         >
-              {isPaid ? 'PAID IN FULL' : 'UNPAID / PAY ON PICKUP'}
+              {isPaid ? 'BAYAD NA' : 'HINDI PA BAYAD / BAYARAN SA PICKUP'}
             </span>
                     </div>
 
@@ -566,7 +557,7 @@ function TrackingView() {
 
                         {order.delivery_fee && order.delivery_fee > 0 ? (
                             <div className="flex justify-between text-indigo-300 font-mono text-xs pt-1">
-                                <span className="font-sans">Delivery Rider Fee</span>
+                                <span className="font-sans">Bayad sa Rider (Delivery Fee)</span>
                                 <span>{formatPHP(order.delivery_fee)}</span>
                             </div>
                         ) : null}
@@ -574,7 +565,7 @@ function TrackingView() {
 
                     <div className="pt-2 border-t border-slate-800 flex justify-between items-baseline font-mono">
             <span className="text-xs font-bold text-slate-300 font-sans">
-              {isPaid ? 'Amount Paid:' : 'Total Amount Due:'}
+              {isPaid ? 'Kabuuang Naibayad:' : 'Kabuuang Babayaran:'}
             </span>
                         <span
                             className={`text-2xl font-black ${
@@ -587,16 +578,16 @@ function TrackingView() {
 
                     {storageFee > 0 && (
                         <p className="text-[10px] text-amber-400 text-right font-mono">
-                            May dagdag na {formatPHP(storageFee)} storage fee dahil lagpas {daysOld} araw na sa shop.
+                            May karagdagang {formatPHP(storageFee)} storage fee dahil lumampas na ng {daysOld} araw sa shop.
                         </p>
                     )}
                 </section>
 
-                {/* Footer */}
+                {/* English Live Connection Footer */}
                 <footer className="text-center space-y-2 pt-2 pb-8">
                     <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-[10px] text-slate-400">
                         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                        <span>Kusang nag-uupdate ang screen (Live Connection)</span>
+                        <span>Live updates enabled • Screen updates automatically</span>
                     </div>
                     <p className="text-[10px] text-slate-600 font-mono">
                         Powered by Rinset POS • Laundry Operating System
