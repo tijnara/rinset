@@ -1,12 +1,13 @@
+// C:\Users\UserT\WebstormProjects\rinset\src\app\track\[orderNumber]\page.tsx
 'use client';
 
 import { Suspense, useEffect, useState, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { formatPHP, formatManilaTime } from '@/lib/formatters';
+import { formatPHP } from '@/lib/formatters';
 import { Order, OrderStatus, OrderBasket } from '@/types/database';
+import { RinsetLogo } from '@/components/icons/RinsetLogo';
 import {
-    CheckCircle2,
     MapPin,
     Bike,
     AlertTriangle,
@@ -260,9 +261,8 @@ function TrackingView() {
     const isReady = currentStage === 'ready_for_pickup' || currentStage === 'claimed';
     const isClaimed = currentStage === 'claimed';
 
-    const daysOld = Math.floor(
-        (Date.now() - new Date(order.created_at).getTime()) / (1000 * 60 * 60 * 24)
-    );
+    const msInDay = 1000 * 60 * 60 * 24;
+    const daysOld = Math.floor((Date.now() - new Date(order.created_at).getTime()) / msInDay);
     const storageFee = isReady && !isClaimed && daysOld >= 14 ? (daysOld - 14) * 10 : 0;
     const totalDue = isPaid ? storageFee : order.net_payable + storageFee;
 
@@ -297,9 +297,7 @@ function TrackingView() {
                 {/* Top Header Card */}
                 <header className="flex items-center justify-between bg-slate-900/80 backdrop-blur-md border border-slate-800 p-3.5 rounded-2xl shadow-xl">
                     <div className="flex items-center space-x-2.5">
-                        <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-500 to-cyan-300 flex items-center justify-center text-slate-950 font-black text-lg shadow-md shadow-sky-500/20">
-                            R
-                        </div>
+                        <RinsetLogo className="w-9 h-9 flex-shrink-0" />
                         <div>
                             <h1 className="text-sm font-bold text-white leading-none">{storeName}</h1>
                             <p className="text-[10px] text-slate-400 font-mono mt-0.5">

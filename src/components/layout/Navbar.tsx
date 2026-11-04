@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore, PinPad } from '@/features/auth';
+import { RinsetLogo } from '@/components/icons/RinsetLogo';
 import {
     LayoutDashboard,
     ShoppingCart,
@@ -41,11 +42,9 @@ export function Navbar({ storeName }: NavbarProps) {
     return (
         <>
             {/* Top Header Bar */}
-            <header className="h-14 border-b border-slate-800 px-3 sm:px-4 flex items-center justify-between bg-slate-900/90 backdrop-blur sticky top-0 z-30">
+            <header className="h-14 border-b border-slate-800 px-3 sm:px-4 flex items-center justify-between bg-slate-900/90 backdrop-blur sticky top-0 z-30 flex-shrink-0">
                 <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
-                    <div className="w-8 h-8 rounded-xl bg-sky-500 flex items-center justify-center font-black text-slate-950 text-base shadow-sm flex-shrink-0">
-                        R
-                    </div>
+                    <RinsetLogo className="w-8 h-8 flex-shrink-0" />
                     <div className="min-w-0">
                         <h1 className="text-sm sm:text-base font-bold text-white leading-none">Rinset</h1>
                         <p className="text-[10px] text-slate-400 leading-tight truncate max-w-[110px] sm:max-w-[200px]">
@@ -54,7 +53,7 @@ export function Navbar({ storeName }: NavbarProps) {
                     </div>
                 </div>
 
-                {/* Desktop & Landscape Tablet Navigation */}
+                {/* Desktop Navigation */}
                 <nav className="hidden md:flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
                     {links.map((link) => {
                         const Icon = link.icon;
