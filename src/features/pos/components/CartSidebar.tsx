@@ -15,7 +15,6 @@ interface CartSidebarProps {
 
 export function CartSidebar({
                                 isOpenOnMobile = false,
-                                onOpenMobile,
                                 onCloseMobile,
                                 onProceedCheckout,
                             }: CartSidebarProps) {
@@ -35,13 +34,13 @@ export function CartSidebar({
 
     return (
         <aside
-            className={`w-full lg:w-96 bg-slate-900 border-t lg:border-t-0 lg:border-l border-slate-800 flex flex-col rounded-t-2xl lg:rounded-none ${
+            className={`w-full lg:w-96 bg-slate-900 border-t lg:border-t-0 lg:border-l border-slate-800 flex flex-col h-full flex-shrink-0 ${
                 isOpenOnMobile
                     ? 'fixed inset-0 z-50 lg:static bg-slate-950'
-                    : 'fixed bottom-14 left-0 right-0 z-30 md:bottom-4 md:left-auto md:right-4 md:rounded-2xl lg:static lg:flex'
+                    : 'hidden lg:flex'
             }`}
         >
-            {/* Drawer Header */}
+            {/* 1. Header */}
             <div className="h-14 px-4 border-b border-slate-800 flex justify-between items-center bg-slate-900 flex-shrink-0">
                 <div className="flex items-center space-x-2">
                     <ShoppingBag className="w-5 h-5 text-sky-400" />
@@ -74,21 +73,11 @@ export function CartSidebar({
                             <X className="w-4 h-4" />
                         </button>
                     )}
-                    {!isOpenOnMobile && (
-                        <button
-                            type="button"
-                            onClick={onOpenMobile}
-                            className="lg:hidden rounded-xl bg-sky-500 px-3 py-1.5 text-xs font-bold text-slate-950"
-                            aria-label="Expand ticket"
-                        >
-                            View Ticket
-                        </button>
-                    )}
                 </div>
             </div>
 
-            {/* Basket Identification & Customer Auto-lookup */}
-            <div className={`p-3.5 border-b border-slate-800 space-y-2.5 bg-slate-950/50 flex-shrink-0 ${isOpenOnMobile ? '' : 'hidden lg:block'}`}>
+            {/* 2. Basket Tag & Customer Search */}
+            <div className="p-3.5 border-b border-slate-800 space-y-2.5 bg-slate-950/50 flex-shrink-0">
                 <div className="relative">
                     <Tag className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
                     <input
@@ -109,10 +98,10 @@ export function CartSidebar({
                 />
             </div>
 
-            {/* Item List */}
-            <div className={`min-h-0 flex-1 overflow-y-auto p-3.5 space-y-2 ${isOpenOnMobile ? '' : 'hidden lg:block'}`}>
+            {/* 3. Items List */}
+            <div className="flex-1 overflow-y-auto p-3.5 space-y-2 min-h-0">
                 {breakdown.items.length === 0 ? (
-                    <div className="h-full min-h-24 flex flex-col items-center justify-center text-slate-500 text-xs space-y-2 select-none">
+                    <div className="h-48 flex flex-col items-center justify-center text-slate-500 text-xs space-y-2 select-none">
                         <Bubbles className="w-8 h-8 stroke-1 text-slate-600" />
                         <span>Ticket is empty. Tap items to add.</span>
                     </div>
@@ -169,14 +158,8 @@ export function CartSidebar({
                 )}
             </div>
 
-            {/* Drawer Bottom Actions */}
-            {!isOpenOnMobile && (
-                <div className="flex items-center justify-between border-t border-slate-800 bg-slate-950 px-4 py-3 text-xs font-bold lg:hidden">
-                    <span>Net Payable</span>
-                    <span className="font-mono text-emerald-400">{formatPHP(breakdown.netPayable)}</span>
-                </div>
-            )}
-            <div className={`p-4 pb-6 lg:pb-4 border-t border-slate-800 bg-slate-950 space-y-3 flex-shrink-0 ${isOpenOnMobile ? '' : 'hidden lg:block'}`}>
+            {/* 4. Totals & Checkout Button */}
+            <div className="p-4 border-t border-slate-800 bg-slate-950 space-y-3 flex-shrink-0">
                 <div className="space-y-1.5 text-xs font-mono">
                     <div className="flex justify-between text-slate-400">
                         <span>Subtotal</span>
