@@ -22,20 +22,17 @@ import {
     Store,
     X,
     Search,
-    Crown,
 } from 'lucide-react';
 
 export function CatalogManagerView() {
     const authStoreName = useAuthStore((state) => state.storeName);
     const authStoreId = useAuthStore((state) => state.storeId);
     const setStore = useAuthStore((state) => state.setStore);
-    const { user, loginWithPin } = useAuthStore();
+    const { loginWithPin } = useAuthStore();
 
     const {
         items,
         storeName: hookStoreName,
-        nameChangeCount,
-        isSuperAdmin,
         isOwner,
         updateStoreName,
         saveItem,
@@ -112,12 +109,7 @@ export function CatalogManagerView() {
                                 Service Rates & Store Settings
                             </h2>
 
-                            {isSuperAdmin ? (
-                                <span className="px-2.5 py-0.5 bg-purple-500/10 border border-purple-500/30 text-purple-400 text-[11px] font-bold rounded-full flex items-center gap-1">
-                  <Crown className="w-3 h-3" />
-                  Super Admin
-                </span>
-                            ) : isOwner ? (
+                            {isOwner ? (
                                 <span className="px-2.5 py-0.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] font-bold rounded-full flex items-center gap-1">
                   <Shield className="w-3 h-3" />
                   Owner Mode
@@ -130,11 +122,9 @@ export function CatalogManagerView() {
                             )}
                         </div>
                         <p className="text-xs text-slate-400 mt-0.5">
-                            {isSuperAdmin
-                                ? 'Super Admin Mode: Manage rates, branding, and perform unlimited store updates.'
-                                : isOwner
-                                    ? 'Configure business branding, owner security PIN, per-kilo rates, and retail stock.'
-                                    : 'Rates are locked. Cashiers can view prices for customer inquiries.'}
+                            {isOwner
+                                ? 'Configure business branding, owner security PIN, per-kilo rates, and retail stock.'
+                                : 'Rates are locked. Cashiers can view prices for customer inquiries.'}
                         </p>
                     </div>
 
@@ -148,17 +138,6 @@ export function CatalogManagerView() {
                             >
                                 <Store className="w-3.5 h-3.5 text-sky-400" />
                                 <span>Change Business Name</span>
-                                {!isSuperAdmin && (
-                                    <span
-                                        className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full ${
-                                            nameChangeCount >= 1
-                                                ? 'bg-rose-500/20 text-rose-300'
-                                                : 'bg-emerald-500/20 text-emerald-300'
-                                        }`}
-                                    >
-                    {nameChangeCount >= 1 ? '1/1 used' : '0/1 used'}
-                  </span>
-                                )}
                             </button>
 
                             <button
@@ -355,8 +334,6 @@ export function CatalogManagerView() {
                     isOpen={isEditStoreOpen}
                     onClose={() => setIsEditStoreOpen(false)}
                     currentStoreName={storeName}
-                    nameChangeCount={nameChangeCount}
-                    isSuperAdmin={isSuperAdmin}
                     onSave={handleUpdateStoreName}
                 />
             )}
@@ -382,7 +359,7 @@ export function CatalogManagerView() {
                             errorMessage={unlockError}
                             onComplete={async (pin) => {
                                 const res = await loginWithPin(pin);
-                                if (res.success && (res.role === 'owner' || res.role === 'super_admin')) {
+                                if (res.success && res.role === 'owner') {
                                     setIsUnlockModalOpen(false);
                                     setUnlockError(null);
                                     return true;

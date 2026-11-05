@@ -15,9 +15,9 @@ export function useCatalogManager() {
     const [nameChangeCount, setNameChangeCount] = useState<number>(0);
     const [isLoading, setIsLoading] = useState<boolean>(true);
 
-    const isSuperAdmin = user?.role === 'super_admin';
-    const isOwner = user?.role === 'owner' || isSuperAdmin;
-    const canChangeName = isSuperAdmin || (isOwner && nameChangeCount < 1);
+    const isOwner = user?.role === 'owner';
+    const canChangeName = isOwner;
+    const isSuperAdmin = false;
 
     const fetchItems = useCallback(async () => {
         setIsLoading(true);

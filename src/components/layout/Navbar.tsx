@@ -16,7 +16,6 @@ import {
     Lock,
     X,
     LogOut,
-    Crown,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -30,8 +29,7 @@ export function Navbar({ storeName: propStoreName }: NavbarProps) {
     const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
     const [pinError, setPinError] = useState<string | null>(null);
 
-    const isSuperAdmin = user?.role === 'super_admin';
-    const isOwner = user?.role === 'owner' || isSuperAdmin;
+    const isOwner = user?.role === 'owner';
     const displayStoreName = propStoreName || authStoreName || 'Rinset Laundry';
 
     const links = [
@@ -112,12 +110,7 @@ export function Navbar({ storeName: propStoreName }: NavbarProps) {
 
                 {/* Right: Shift Status & Logout */}
                 <div className="flex items-center space-x-2 flex-shrink-0">
-                    {isSuperAdmin ? (
-                        <span className="px-2.5 py-1 bg-purple-500/10 border border-purple-500/30 text-purple-400 text-xs font-bold rounded-xl flex items-center space-x-1.5 shadow-sm">
-              <Crown className="w-3.5 h-3.5 flex-shrink-0 text-purple-400" />
-              <span>Super Admin</span>
-            </span>
-                    ) : isOwner ? (
+                    {isOwner ? (
                         <div className="flex items-center space-x-1.5">
               <span
                   aria-label="Store Owner"
@@ -223,7 +216,7 @@ export function Navbar({ storeName: propStoreName }: NavbarProps) {
                             errorMessage={pinError}
                             onComplete={async (pin) => {
                                 const res = await loginWithPin(pin);
-                                if (res.success && (res.role === 'owner' || res.role === 'super_admin')) {
+                                if (res.success && res.role === 'owner') {
                                     setIsAuthModalOpen(false);
                                     setPinError(null);
                                     return true;
