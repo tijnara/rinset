@@ -92,16 +92,21 @@ export function CheckoutModal({
         const supabase = createClient();
 
         try {
-            // 1. Discover or create customer scoped to store_id
+            // 1. Discover or create customer scoped to store_id (uses full_name and mobile_number)
             let customerId: string | null = null;
             const cleanMobile = customerMobile.trim();
+            const cleanName = customerName.trim();
 
-            const { data: existingCustomer } = await supabase
+            const { data: existingCustomer, error: searchError } = await supabase
                 .from('customers')
                 .select('id')
                 .eq('store_id', effectiveStoreId)
                 .eq('mobile_number', cleanMobile)
                 .maybeSingle();
+
+            if (searchError) {
+                console.error('[Customer Search Error]', searchError);
+            }
 
             if (existingCustomer) {
                 customerId = existingCustomer.id;
@@ -110,34 +115,41 @@ export function CheckoutModal({
                     .from('customers')
                     .insert({
                         store_id: effectiveStoreId,
-                        name: customerName.trim(),
+                        full_name: cleanName,
                         mobile_number: cleanMobile,
                         address: deliveryAddress.trim() || null,
                     })
                     .select('id')
                     .single();
 
-                if (!custError && newCustomer) {
-                    customerId = newCustomer.id;
+                if (custError || !newCustomer) {
+                    throw new Error(custError?.message || 'Failed to register customer record.');
                 }
+
+                customerId = newCustomer.id;
             }
 
             // 2. Determine unique Order Number / Ticket Tag
             const cleanBasketTag = basketTag?.trim() || `B-${Math.floor(100 + Math.random() * 900)}`;
             const orderNumber = cleanBasketTag.toUpperCase();
 
-            // Safely compute discount without TS2339
             const calculatedDiscount =
                 (breakdown as any).discount ?? Math.max(0, breakdown.subtotal - breakdown.netPayable);
 
-            // 3. Insert into orders table with store_id
+            // Validate cashier_id UUID format
+            const isCashierUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                user?.id || ''
+            );
+
+            // 3. Insert into orders table with store_id and basket_tag
             const { data: orderData, error: orderError } = await supabase
                 .from('orders')
                 .insert({
                     store_id: effectiveStoreId,
                     order_number: orderNumber,
+                    basket_tag: cleanBasketTag,
                     customer_id: customerId,
-                    customer_name: customerName.trim(),
+                    customer_name: cleanName,
                     customer_mobile: cleanMobile,
                     status: 'received',
                     delivery_mode: deliveryMode,
@@ -150,12 +162,13 @@ export function CheckoutModal({
                     net_payable: breakdown.netPayable,
                     payment_status: paymentStatus,
                     payment_method: paymentMethod,
-                    cashier_id: user?.id && user.id.includes('-') && user.id.length > 20 ? user.id : null,
+                    cashier_id: isCashierUuid ? user?.id : null,
                 })
                 .select('id, order_number')
                 .single();
 
             if (orderError || !orderData) {
+                console.error('[Order Insert Error Details]', orderError);
                 throw new Error(orderError?.message || 'Failed to register order record.');
             }
 
@@ -180,18 +193,23 @@ export function CheckoutModal({
             }
 
             // 5. Insert physical basket tracker with store_id
-            await supabase.from('order_baskets').insert({
-                order_id: orderData.id,
-                store_id: effectiveStoreId,
-                basket_tag: orderNumber,
-                status: 'received',
-            });
+            try {
+                await supabase.from('order_baskets').insert({
+                    order_id: orderData.id,
+                    store_id: effectiveStoreId,
+                    basket_tag: cleanBasketTag,
+                    status: 'received',
+                });
+            } catch (basketErr) {
+                console.warn('[Order Basket Track Warning]', basketErr);
+            }
 
             // 6. Complete & Reset
             clearCart();
             onSuccess(orderData.order_number);
             onClose();
         } catch (err: any) {
+            console.error('[Transaction Error]', err);
             setErrorMessage(err.message || 'Error processing transaction.');
         } finally {
             setLoading(false);
