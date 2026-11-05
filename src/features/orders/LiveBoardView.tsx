@@ -59,7 +59,6 @@ export function LiveBoardView() {
         const q = searchQuery.toLowerCase();
         const matchesTag = b.basket_tag?.toLowerCase().includes(q) ?? false;
         const matchesNum = b.order?.order_number?.toLowerCase().includes(q) ?? false;
-        // Safely support customer relation or direct field without TS2339
         const customerDisplayName =
             (b.order as any)?.customer_name ||
             b.order?.customer?.full_name ||
@@ -92,12 +91,12 @@ export function LiveBoardView() {
     };
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none pb-16 md:pb-0">
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
             <Navbar storeName={storeName} />
 
             <MachineStatusOverview baskets={baskets} />
 
-            <div className="p-4 border-b border-slate-800 bg-slate-900/40 flex flex-col sm:flex-row justify-between items-center gap-3">
+            <div className="p-4 border-b border-slate-800 bg-slate-900/40 flex flex-col sm:flex-row justify-between items-center gap-3 flex-shrink-0">
                 <div className="flex w-full sm:w-80 gap-2">
                     <div className="relative flex-1">
                         <Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
@@ -128,6 +127,7 @@ export function LiveBoardView() {
                 </div>
             </div>
 
+            {/* Kanban Board Container */}
             <div className="flex-1 overflow-x-auto p-4 flex space-x-4">
                 {LANES.map((lane) => (
                     <KanbanColumn
@@ -146,6 +146,13 @@ export function LiveBoardView() {
                     />
                 ))}
             </div>
+
+            {/* App Footer */}
+            <footer className="py-5 pb-24 lg:pb-6 text-center border-t border-slate-800/80 mt-auto select-none bg-slate-950 flex-shrink-0">
+                <p className="text-xs text-slate-400 font-mono tracking-wider">
+                    Rinset 2026 by tijnara
+                </p>
+            </footer>
 
             {/* Machine Drum Selection Modal */}
             <AssignMachineModal

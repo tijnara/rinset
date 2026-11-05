@@ -16,6 +16,7 @@ import {
     Lock,
     X,
     LogOut,
+    Crown,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -29,7 +30,8 @@ export function Navbar({ storeName: propStoreName }: NavbarProps) {
     const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
     const [pinError, setPinError] = useState<string | null>(null);
 
-    const isOwner = user?.role === 'owner';
+    const isSuperAdmin = user?.role === 'super_admin';
+    const isOwner = user?.role === 'owner' || isSuperAdmin;
     const displayStoreName = propStoreName || authStoreName || 'Rinset Laundry';
 
     const links = [
@@ -110,7 +112,12 @@ export function Navbar({ storeName: propStoreName }: NavbarProps) {
 
                 {/* Right: Shift Status & Logout */}
                 <div className="flex items-center space-x-2 flex-shrink-0">
-                    {isOwner ? (
+                    {isSuperAdmin ? (
+                        <span className="px-2.5 py-1 bg-purple-500/10 border border-purple-500/30 text-purple-400 text-xs font-bold rounded-xl flex items-center space-x-1.5 shadow-sm">
+              <Crown className="w-3.5 h-3.5 flex-shrink-0 text-purple-400" />
+              <span>Super Admin</span>
+            </span>
+                    ) : isOwner ? (
                         <div className="flex items-center space-x-1.5">
               <span
                   aria-label="Store Owner"
@@ -151,7 +158,7 @@ export function Navbar({ storeName: propStoreName }: NavbarProps) {
                         type="button"
                         onClick={handleLogout}
                         title="Sign out of store terminal"
-                        className="h-8 px-2.5 bg-slate-800/90 hover:bg-rose-500/20 active:bg-rose-500/30 border border-slate-700 hover:border-rose-500/40 text-slate-400 hover:text-rose-400 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition shadow-sm"
+                        className="h-8 px-2.5 bg-slate-800/90 hover:bg-rose-500/20 active:bg-rose-500/30 border border-slate-700 hover:border-rose-500/40 text-slate-400 hover:text-rose-400 rounded-xl text-xs font-bold flex items-center space-x-1 transition shadow-sm"
                     >
                         <LogOut className="w-3.5 h-3.5 flex-shrink-0" />
                         <span className="hidden sm:inline">Logout</span>
@@ -195,7 +202,7 @@ export function Navbar({ storeName: propStoreName }: NavbarProps) {
                 </div>
             </nav>
 
-            {/* 3. Owner PIN Unlock Modal */}
+            {/* 3. PIN Unlock Modal */}
             {isAuthModalOpen && (
                 <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                     <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative">
@@ -211,17 +218,17 @@ export function Navbar({ storeName: propStoreName }: NavbarProps) {
                         </button>
 
                         <PinPad
-                            title="Enter Owner PIN"
-                            subtitle="Enter 4-digit security PIN to unlock owner controls"
+                            title="Enter Security PIN"
+                            subtitle="Enter 4-digit security PIN to unlock controls"
                             errorMessage={pinError}
                             onComplete={async (pin) => {
                                 const res = await loginWithPin(pin);
-                                if (res.success && res.role === 'owner') {
+                                if (res.success && (res.role === 'owner' || res.role === 'super_admin')) {
                                     setIsAuthModalOpen(false);
                                     setPinError(null);
                                     return true;
                                 }
-                                setPinError('Invalid Owner PIN. Please try again.');
+                                setPinError('Invalid Security PIN. Please try again.');
                                 return false;
                             }}
                         />

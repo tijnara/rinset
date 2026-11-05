@@ -7,6 +7,8 @@ interface EditStoreNameModalProps {
     isOpen: boolean;
     onClose: () => void;
     currentStoreName: string;
+    nameChangeCount?: number;
+    isSuperAdmin?: boolean;
     onSave: (newName: string) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -34,6 +36,7 @@ export function EditStoreNameModal({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
         if (!storeName.trim()) {
             setErrorMsg('Business name cannot be empty.');
             return;
@@ -66,13 +69,13 @@ export function EditStoreNameModal({
                     <X className="w-4 h-4" />
                 </button>
 
-                <div className="flex items-center space-x-2.5 mb-1">
+                <div className="flex items-center space-x-2.5 mb-4">
                     <div className="w-9 h-9 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-400 flex items-center justify-center">
                         <Store className="w-5 h-5" />
                     </div>
                     <div>
                         <h3 className="font-bold text-white text-base leading-none">Change Business Name</h3>
-                        <p className="text-[11px] text-slate-400 mt-0.5">Appears on tickets, receipts, and header</p>
+                        <p className="text-[11px] text-slate-400 mt-1">Appears on tickets, receipts, and header</p>
                     </div>
                 </div>
 
@@ -83,20 +86,21 @@ export function EditStoreNameModal({
                         <p className="text-xs text-slate-400">Your store branding has been saved.</p>
                     </div>
                 ) : (
-                    <form onSubmit={handleSubmit} className="space-y-4 mt-4">
+                    <form onSubmit={handleSubmit} className="space-y-4">
                         <div className="space-y-1.5">
                             <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                                 Business / Branch Name
                             </label>
                             <input
                                 type="text"
+                                disabled={isSubmitting}
                                 value={storeName}
                                 onChange={(e) => {
                                     setStoreName(e.target.value);
                                     setErrorMsg(null);
                                 }}
                                 placeholder="e.g. Rinset Laundry - Dagupan"
-                                className="w-full h-11 bg-slate-950 border border-slate-800 rounded-xl px-3 text-sm text-white placeholder-slate-600 focus:border-sky-400 focus:outline-none transition"
+                                className="w-full h-11 bg-slate-950 border border-slate-800 rounded-xl px-3 text-sm text-white placeholder-slate-600 focus:border-sky-400 focus:outline-none disabled:opacity-40 transition"
                                 autoFocus
                             />
                             <p className="text-[10px] text-slate-500">

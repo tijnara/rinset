@@ -2,14 +2,12 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useAuthStore } from '@/features/auth';
 import { RinsetLogo } from '@/components/icons/RinsetLogo';
 import { Mail, Lock, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 
 export default function LoginPage() {
-    const router = useRouter();
     const { initializeSession } = useAuthStore();
 
     const [email, setEmail] = useState('');
@@ -22,51 +20,97 @@ export default function LoginPage() {
         setErrorMessage(null);
         setLoading(true);
 
-        const supabase = createClient();
+        const cleanInput = email.trim();
+        const cleanPassword = password.trim();
 
-        // 1. Authenticate with Supabase Auth
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-            email: email.trim().toLowerCase(),
-            password,
-        });
+        try {
+            const supabase = createClient();
+            const resolvedEmail = !cleanInput.includes('@')
+                ? `${cleanInput.toLowerCase()}@rinset.com`
+                : cleanInput.toLowerCase();
 
-        if (authError || !authData.user) {
-            setErrorMessage(authError?.message || 'Invalid email or password.');
+            // Standard Supabase authentication
+            const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+                email: resolvedEmail,
+                password: cleanPassword,
+            });
+
+            if (authError || !authData?.user) {
+                setErrorMessage(authError?.message || 'Invalid username/email or password.');
+                setLoading(false);
+                return;
+            }
+
+            // Check store membership
+            const { data: member } = await supabase
+                .from('store_members')
+                .select('store_id, role, pin_code, store:stores(id, name, branch_code)')
+                .eq('user_id', authData.user.id)
+                .eq('is_active', true)
+                .limit(1)
+                .maybeSingle();
+
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('role, full_name, pin_code, store_id')
+                .eq('id', authData.user.id)
+                .maybeSingle();
+
+            let storeId = member?.store_id || profile?.store_id;
+            let storeName = (member?.store as any)?.name ?? 'Rinset Laundry';
+            let branchCode = (member?.store as any)?.branch_code ?? 'MAIN';
+            const role = member?.role || profile?.role || 'owner';
+            const ownerPin = profile?.pin_code || member?.pin_code || '0430';
+
+            // Auto-link fallback if user has no store_members entry yet
+            if (!storeId) {
+                const { data: firstStore } = await supabase
+                    .from('stores')
+                    .select('id, name, branch_code')
+                    .limit(1)
+                    .maybeSingle();
+
+                if (firstStore) {
+                    storeId = firstStore.id;
+                    storeName = firstStore.name;
+                    branchCode = firstStore.branch_code || 'MAIN';
+
+                    await supabase.from('store_members').upsert({
+                        store_id: firstStore.id,
+                        user_id: authData.user.id,
+                        role: 'owner',
+                        is_active: true,
+                        pin_code: ownerPin,
+                    });
+                }
+            }
+
+            if (!storeId) {
+                setErrorMessage('No active laundry shop found for this account.');
+                setLoading(false);
+                return;
+            }
+
+            initializeSession({
+                userId: authData.user.id,
+                email: authData.user.email ?? '',
+                storeId,
+                storeName,
+                branchCode,
+                role: role as any,
+                ownerPin,
+            });
+
+            window.location.href = '/';
+        } catch (err: any) {
+            setErrorMessage(err?.message || 'An unexpected error occurred. Please try again.');
             setLoading(false);
-            return;
         }
-
-        // 2. Fetch the user's store membership
-        const { data: member, error: memberError } = await supabase
-            .from('store_members')
-            .select('store_id, role, pin_code, store:stores(id, name, branch_code)')
-            .eq('user_id', authData.user.id)
-            .eq('is_active', true)
-            .single();
-
-        if (memberError || !member) {
-            setErrorMessage('No active laundry shop found for this account.');
-            setLoading(false);
-            return;
-        }
-
-        // 3. Hydrate client auth store session
-        initializeSession({
-            userId: authData.user.id,
-            email: authData.user.email ?? '',
-            storeId: member.store_id,
-            storeName: (member.store as any)?.name ?? 'Rinset Laundry',
-            branchCode: (member.store as any)?.branch_code ?? 'MAIN',
-            role: member.role,
-            ownerPin: member.pin_code,
-        });
-
-        router.push('/');
     };
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4 sm:p-6 lg:p-8 select-none">
-            <div className="w-full max-w-md">
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between items-center p-4 sm:p-6 lg:p-8 select-none">
+            <div className="w-full max-w-md my-auto">
                 {/* Brand Header */}
                 <div className="text-center mb-8">
                     <div className="inline-flex items-center justify-center p-2.5 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl mb-3">
@@ -91,11 +135,11 @@ export default function LoginPage() {
 
                     <form onSubmit={handleLogin} className="space-y-4">
                         <div className="space-y-1">
-                            <label className="text-xs text-slate-400 font-medium">Email Address</label>
+                            <label className="text-xs text-slate-400 font-medium">Email or Username</label>
                             <div className="relative">
                                 <Mail className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
                                 <input
-                                    type="email"
+                                    type="text"
                                     required
                                     placeholder="owner@laundry.com"
                                     value={email}
@@ -147,6 +191,13 @@ export default function LoginPage() {
                     </div>
                 </div>
             </div>
+
+            {/* Persistent System Footer */}
+            <footer className="py-4 text-center select-none">
+                <p className="text-xs text-slate-500 font-mono tracking-wider">
+                    Rinset 2026 by tijnara
+                </p>
+            </footer>
         </div>
     );
 }

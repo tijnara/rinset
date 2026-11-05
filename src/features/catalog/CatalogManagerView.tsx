@@ -22,6 +22,7 @@ import {
     Store,
     X,
     Search,
+    Crown,
 } from 'lucide-react';
 
 export function CatalogManagerView() {
@@ -33,6 +34,9 @@ export function CatalogManagerView() {
     const {
         items,
         storeName: hookStoreName,
+        nameChangeCount,
+        isSuperAdmin,
+        isOwner,
         updateStoreName,
         saveItem,
         deleteItem,
@@ -50,8 +54,6 @@ export function CatalogManagerView() {
 
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
-
-    const isOwner = user?.role === 'owner';
 
     const categories = useMemo(() => {
         const cats = Array.from(new Set(items.map((i) => i.category.toUpperCase())));
@@ -74,20 +76,11 @@ export function CatalogManagerView() {
         newName: string
     ): Promise<{ success: boolean; error?: string }> => {
         try {
-            const res: any = await updateStoreName(newName);
-            if (typeof res === 'object' && res !== null && 'success' in res) {
-                if (res.success && authStoreId) {
-                    setStore(authStoreId, newName);
-                }
-                return res;
+            const res = await updateStoreName(newName);
+            if (res.success && authStoreId) {
+                setStore(authStoreId, newName);
             }
-            if (res) {
-                if (authStoreId) {
-                    setStore(authStoreId, newName);
-                }
-                return { success: true };
-            }
-            return { success: false, error: 'Failed to update store name.' };
+            return res;
         } catch (err: any) {
             return { success: false, error: err.message || 'Failed to update store name.' };
         }
@@ -119,7 +112,12 @@ export function CatalogManagerView() {
                                 Service Rates & Store Settings
                             </h2>
 
-                            {isOwner ? (
+                            {isSuperAdmin ? (
+                                <span className="px-2.5 py-0.5 bg-purple-500/10 border border-purple-500/30 text-purple-400 text-[11px] font-bold rounded-full flex items-center gap-1">
+                  <Crown className="w-3 h-3" />
+                  Super Admin
+                </span>
+                            ) : isOwner ? (
                                 <span className="px-2.5 py-0.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] font-bold rounded-full flex items-center gap-1">
                   <Shield className="w-3 h-3" />
                   Owner Mode
@@ -132,9 +130,11 @@ export function CatalogManagerView() {
                             )}
                         </div>
                         <p className="text-xs text-slate-400 mt-0.5">
-                            {isOwner
-                                ? 'Configure business branding, owner security PIN, per-kilo rates, and retail stock.'
-                                : 'Rates are locked. Cashiers can view prices for customer inquiries.'}
+                            {isSuperAdmin
+                                ? 'Super Admin Mode: Manage rates, branding, and perform unlimited store updates.'
+                                : isOwner
+                                    ? 'Configure business branding, owner security PIN, per-kilo rates, and retail stock.'
+                                    : 'Rates are locked. Cashiers can view prices for customer inquiries.'}
                         </p>
                     </div>
 
@@ -148,6 +148,17 @@ export function CatalogManagerView() {
                             >
                                 <Store className="w-3.5 h-3.5 text-sky-400" />
                                 <span>Change Business Name</span>
+                                {!isSuperAdmin && (
+                                    <span
+                                        className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full ${
+                                            nameChangeCount >= 1
+                                                ? 'bg-rose-500/20 text-rose-300'
+                                                : 'bg-emerald-500/20 text-emerald-300'
+                                        }`}
+                                    >
+                    {nameChangeCount >= 1 ? '1/1 used' : '0/1 used'}
+                  </span>
+                                )}
                             </button>
 
                             <button
@@ -226,7 +237,7 @@ export function CatalogManagerView() {
                     </div>
                 </div>
 
-                {/* Catalog Items Grid (Responsive 3-to-4 Columns) */}
+                {/* Catalog Items Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                     {filteredItems.map((item) => {
                         const unitSuffix = getUnitSuffix(item.pricing_type);
@@ -263,7 +274,6 @@ export function CatalogManagerView() {
                                     </p>
                                 </div>
 
-                                {/* Card Bottom Controls */}
                                 <div className="pt-3 border-t border-slate-800/80 mt-3 flex items-center justify-between">
                   <span
                       className={`text-[10px] font-bold uppercase tracking-wider ${
@@ -322,8 +332,12 @@ export function CatalogManagerView() {
                     item={selectedItem}
                     isOpen={isModalOpen}
                     onClose={() => setIsModalOpen(false)}
-                    onSave={saveItem}
-                    onDelete={deleteItem}
+                    onSave={async (itemData) => {
+                        await saveItem(itemData);
+                    }}
+                    onDelete={async (id) => {
+                        await deleteItem(id);
+                    }}
                 />
             )}
 
@@ -341,6 +355,8 @@ export function CatalogManagerView() {
                     isOpen={isEditStoreOpen}
                     onClose={() => setIsEditStoreOpen(false)}
                     currentStoreName={storeName}
+                    nameChangeCount={nameChangeCount}
+                    isSuperAdmin={isSuperAdmin}
                     onSave={handleUpdateStoreName}
                 />
             )}
@@ -366,12 +382,12 @@ export function CatalogManagerView() {
                             errorMessage={unlockError}
                             onComplete={async (pin) => {
                                 const res = await loginWithPin(pin);
-                                if (res.success && res.role === 'owner') {
+                                if (res.success && (res.role === 'owner' || res.role === 'super_admin')) {
                                     setIsUnlockModalOpen(false);
                                     setUnlockError(null);
                                     return true;
                                 }
-                                setUnlockError('Access Denied: Incorrect Owner PIN.');
+                                setUnlockError('Access Denied: Incorrect Security PIN.');
                                 return false;
                             }}
                         />

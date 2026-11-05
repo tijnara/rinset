@@ -131,7 +131,7 @@ export function POSView() {
             {/* 1. Header (Fixed 56px) */}
             <Navbar storeName={storeName} />
 
-            {/* 2. Main Body Split (100% of remaining screen height) */}
+            {/* 2. Main Body Split */}
             <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden w-full">
                 {/* Left Column: Full-Height Catalog */}
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-slate-950">
@@ -238,8 +238,8 @@ export function POSView() {
                         </div>
                     </div>
 
-                    {/* Catalog Scroll Body */}
-                    <div className="flex-1 min-h-0 overflow-y-auto">
+                    {/* Catalog Scroll Body with Anchored Footer */}
+                    <div className="flex-1 min-h-0 overflow-y-auto flex flex-col justify-between">
                         <CatalogGrid
                             items={filteredCatalog}
                             cartItems={items}
@@ -249,6 +249,13 @@ export function POSView() {
                                 setSelectedCategory('ALL');
                             }}
                         />
+
+                        {/* App Footer */}
+                        <footer className="py-5 pb-20 lg:pb-5 text-center border-t border-slate-800/80 mt-auto select-none bg-slate-950 flex-shrink-0">
+                            <p className="text-xs text-slate-400 font-mono tracking-wider">
+                                Rinset 2026 by tijnara
+                            </p>
+                        </footer>
                     </div>
                 </div>
 

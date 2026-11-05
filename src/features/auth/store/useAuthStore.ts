@@ -60,7 +60,9 @@ export const useAuthStore = create<AuthState>()(
             },
 
             initializeSession: (session: StoreSessionData) => {
-                const assignedRole: UserRole = session.role ?? 'owner';
+                const assignedRole: UserRole =
+                    session.role === 'cashier' || session.role === 'staff' ? session.role : 'owner';
+
                 set({
                     user: {
                         id: session.userId,
@@ -82,7 +84,7 @@ export const useAuthStore = create<AuthState>()(
                 try {
                     const supabase = createClient();
 
-                    // 1. Check multi-tenant store_members table
+                    // 1. Check store_members table
                     let query = supabase
                         .from('store_members')
                         .select(`
@@ -103,20 +105,21 @@ export const useAuthStore = create<AuthState>()(
                     const { data: member } = await query.limit(1).maybeSingle();
 
                     if (member) {
-                        const role: UserRole = member.role === 'owner' ? 'owner' : 'cashier';
+                        const role: UserRole = (member.role as UserRole) || 'cashier';
+                        const isOwner = role === 'owner';
                         const profileData: any = Array.isArray(member.user) ? member.user[0] : member.user;
                         const storeData: any = Array.isArray(member.store) ? member.store[0] : member.store;
 
                         const user: AuthUser = {
                             id: member.id,
-                            name: profileData?.full_name || (role === 'owner' ? 'Store Owner' : 'Shift Cashier'),
+                            name: profileData?.full_name || (isOwner ? 'Store Owner' : 'Shift Cashier'),
                             role,
                         };
 
                         set({
                             user,
                             isAuthenticated: true,
-                            ...(role === 'owner' ? { ownerPin: pin } : {}),
+                            ...(isOwner ? { ownerPin: pin } : {}),
                             ...(storeData
                                 ? {
                                     storeId: storeData.id,
@@ -129,36 +132,36 @@ export const useAuthStore = create<AuthState>()(
                         return { success: true, role };
                     }
 
-                    // 2. Fallback check for legacy profiles table if store_members has no match
-                    const { data: legacyProfile } = await supabase
+                    // 2. Check profiles table
+                    const { data: profile } = await supabase
                         .from('profiles')
                         .select('id, full_name, role, pin_code')
                         .eq('pin_code', pin)
                         .limit(1)
                         .maybeSingle();
 
-                    if (legacyProfile) {
-                        const role: UserRole = legacyProfile.role === 'owner' ? 'owner' : 'cashier';
+                    if (profile) {
+                        const role: UserRole = (profile.role as UserRole) || 'cashier';
+                        const isOwner = role === 'owner';
                         const user: AuthUser = {
-                            id: legacyProfile.id,
-                            name: legacyProfile.full_name || (role === 'owner' ? 'Store Owner' : 'Shift Cashier'),
+                            id: profile.id,
+                            name: profile.full_name || (isOwner ? 'Store Owner' : 'Shift Cashier'),
                             role,
                         };
-                        set({ user, isAuthenticated: true, ...(role === 'owner' ? { ownerPin: pin } : {}) });
+                        set({ user, isAuthenticated: true, ...(isOwner ? { ownerPin: pin } : {}) });
                         return { success: true, role };
                     }
                 } catch {
-                    // Fall through to offline fallback credentials
+                    // Fall through to offline credentials
                 }
 
-                // 3. Match against active Owner PIN (custom or default '9999')
+                // 3. Fallback PINs
                 if (pin === activeOwnerPin) {
                     const user: AuthUser = { id: 'owner-master', name: 'Store Owner', role: 'owner' };
                     set({ user, isAuthenticated: true });
                     return { success: true, role: 'owner' };
                 }
 
-                // 4. Match against default Cashier PIN ('1234')
                 if (pin === '1234') {
                     const user: AuthUser = { id: 'cashier-shift', name: 'Shift Cashier', role: 'cashier' };
                     set({ user, isAuthenticated: true });
@@ -211,11 +214,8 @@ export const useAuthStore = create<AuthState>()(
                             .update({ pin_code: newPin })
                             .eq('store_id', storeId)
                             .eq('role', 'owner');
-                    } else if (user?.id && user.id !== 'owner-master') {
-                        await supabase
-                            .from('profiles')
-                            .update({ pin_code: newPin })
-                            .eq('id', user.id);
+                    } else if (user?.id && !user.id.includes('master')) {
+                        await supabase.from('profiles').update({ pin_code: newPin }).eq('id', user.id);
                     }
                 } catch {
                     // Handled via local persistent state
@@ -237,7 +237,7 @@ export const useAuthStore = create<AuthState>()(
                     const supabase = createClient();
                     await supabase.auth.signOut();
                 } catch {
-                    // Proceed with local state cleanup
+                    // Fall through
                 }
 
                 set({
