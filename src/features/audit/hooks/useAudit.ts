@@ -21,6 +21,7 @@ export interface AuditMetrics {
     claimedOrdersCount: number;
     totalSales: number;
     totalGrossSales: number;
+    grossSales: number;
     cashSales: number;
     gcashSales: number;
     pettyCashOut: number;
@@ -40,6 +41,7 @@ const DEFAULT_METRICS: AuditMetrics = {
     claimedOrdersCount: 0,
     totalSales: 0,
     totalGrossSales: 0,
+    grossSales: 0,
     cashSales: 0,
     gcashSales: 0,
     pettyCashOut: 0,
@@ -74,7 +76,6 @@ export function useAudit(customDate?: string) {
     }, []);
 
     const loadAuditData = useCallback(async () => {
-        // Only fetch if a valid storeId is actively loaded
         if (!storeId || storeId.length < 20) {
             setLoading(false);
             return;
@@ -101,7 +102,7 @@ export function useAudit(customDate?: string) {
         const currentExpenses = (expenseData as ExpenseRecord[]) || [];
         setExpenses(currentExpenses);
 
-        // 2. Fetch orders using select('*') to prevent 400 on missing cherry-picked columns
+        // 2. Fetch orders
         const { data: orderData, error: orderError } = await supabase
             .from('orders')
             .select('*')
@@ -110,7 +111,7 @@ export function useAudit(customDate?: string) {
             .lte('created_at', endISO);
 
         if (orderError) {
-            console.error('[useAudit] Orders query error:', orderError.message, orderError.details);
+            console.error('[useAudit] Orders query error:', orderError.message);
         }
 
         const currentOrders = orderData || [];
@@ -123,7 +124,6 @@ export function useAudit(customDate?: string) {
         let activeCount = 0;
 
         currentOrders.forEach((ord: any) => {
-            // Support common column names dynamically
             const amt = Number(ord.net_payable ?? ord.total_amount ?? ord.total_price ?? ord.total ?? 0);
             const paymentStatus = ord.payment_status ?? (ord.is_paid ? 'paid' : 'unpaid');
             const paymentMethod = (ord.payment_method ?? ord.payment_mode ?? 'cash').toLowerCase();
@@ -141,7 +141,7 @@ export function useAudit(customDate?: string) {
 
         const totalGrossSales = cashSales + gcashSales;
         const totalExpenses = currentExpenses.reduce(
-            (acc, curr) => acc + Number(curr.amount || 0),
+            (acc, curr) => acc + (Number(curr.amount) || 0),
             0
         );
         const netCashInDrawer = cashSales - totalExpenses;
@@ -153,6 +153,7 @@ export function useAudit(customDate?: string) {
             claimedOrdersCount: claimedCount,
             totalSales: totalGrossSales,
             totalGrossSales,
+            grossSales: totalGrossSales,
             cashSales,
             gcashSales,
             pettyCashOut: totalExpenses,

@@ -1,10 +1,14 @@
-export function formatPHP(amount: number): string {
+export function formatPHP(amount?: number | null): string {
+    if (amount === undefined || amount === null || isNaN(amount)) {
+        return '₱0.00';
+    }
+    const cleanAmount = Math.abs(amount) < 0.001 ? 0 : amount;
     return new Intl.NumberFormat('en-PH', {
         style: 'currency',
         currency: 'PHP',
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
-    }).format(amount);
+    }).format(cleanAmount);
 }
 
 export function formatManilaTime(dateString: string): string {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useCatalogManager } from './hooks/useCatalogManager';
 import { CatalogItemModal } from './components/CatalogItemModal';
 import { ChangePinModal } from './components/ChangePinModal';
@@ -21,6 +21,7 @@ import {
     KeyRound,
     Store,
     X,
+    Search,
 } from 'lucide-react';
 
 export function CatalogManagerView() {
@@ -29,8 +30,14 @@ export function CatalogManagerView() {
     const setStore = useAuthStore((state) => state.setStore);
     const { user, loginWithPin } = useAuthStore();
 
-    const { items, storeName: hookStoreName, updateStoreName, saveItem, deleteItem, toggleActiveStatus } =
-        useCatalogManager();
+    const {
+        items,
+        storeName: hookStoreName,
+        updateStoreName,
+        saveItem,
+        deleteItem,
+        toggleActiveStatus,
+    } = useCatalogManager();
 
     const storeName = authStoreName || hookStoreName || 'Rinset Laundry';
 
@@ -41,9 +48,28 @@ export function CatalogManagerView() {
     const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
     const [unlockError, setUnlockError] = useState<string | null>(null);
 
+    const [searchQuery, setSearchQuery] = useState('');
+    const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
+
     const isOwner = user?.role === 'owner';
 
-    // Return the expected Promise<{ success: boolean; error?: string }>
+    const categories = useMemo(() => {
+        const cats = Array.from(new Set(items.map((i) => i.category.toUpperCase())));
+        return ['ALL', ...cats];
+    }, [items]);
+
+    const filteredItems = useMemo(() => {
+        return items.filter((item) => {
+            const matchesCategory =
+                selectedCategory === 'ALL' || item.category.toUpperCase() === selectedCategory;
+            const matchesSearch =
+                !searchQuery.trim() ||
+                item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                item.category.toLowerCase().includes(searchQuery.toLowerCase());
+            return matchesCategory && matchesSearch;
+        });
+    }, [items, selectedCategory, searchQuery]);
+
     const handleUpdateStoreName = async (
         newName: string
     ): Promise<{ success: boolean; error?: string }> => {
@@ -67,11 +93,23 @@ export function CatalogManagerView() {
         }
     };
 
+    const getUnitSuffix = (pricingType: string) => {
+        switch (pricingType) {
+            case 'per_kilo':
+                return 'kg';
+            case 'per_load':
+                return 'load';
+            case 'per_piece':
+            default:
+                return 'pc';
+        }
+    };
+
     return (
         <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
             <Navbar storeName={storeName} />
 
-            <main className="flex-1 p-4 md:p-6 max-w-5xl w-full mx-auto space-y-5">
+            <main className="flex-1 p-4 md:p-6 max-w-7xl w-full mx-auto space-y-4">
                 {/* Header Bar */}
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-900/60 border border-slate-800 p-4 rounded-2xl">
                     <div>
@@ -100,7 +138,7 @@ export function CatalogManagerView() {
                         </p>
                     </div>
 
-                    {/* Action Buttons: Owner Controls vs Cashier Unlock */}
+                    {/* Action Buttons */}
                     {isOwner ? (
                         <div className="flex items-center gap-2 flex-wrap">
                             <button
@@ -148,76 +186,133 @@ export function CatalogManagerView() {
                     )}
                 </div>
 
-                {/* Catalog Items Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {items.map((item) => (
-                        <div
-                            key={item.id}
-                            className={`border rounded-2xl p-4 flex justify-between items-center transition ${
-                                item.is_active
-                                    ? 'bg-slate-900 border-slate-800'
-                                    : 'bg-slate-900/30 border-slate-800/40 opacity-60'
-                            }`}
-                        >
-                            <div className="space-y-1">
-                                <div className="flex items-center gap-2">
-                  <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                    {item.category}
-                  </span>
-                                    {item.minimum_quantity > 0 && (
-                                        <span className="text-[10px] text-amber-400 font-mono">
-                      Min {item.minimum_quantity}kg
-                    </span>
-                                    )}
-                                    {!item.is_active && (
-                                        <span className="text-[10px] text-rose-400 font-bold uppercase">
-                      Inactive
-                    </span>
-                                    )}
-                                </div>
-                                <h3 className="font-semibold text-sm text-white">{item.name}</h3>
-                                <p className="font-mono text-base font-bold text-sky-400">
-                                    {formatPHP(item.unit_price)}{' '}
-                                    <span className="text-xs font-normal text-slate-400">
-                    / {item.pricing_type.replace('_', ' ')}
-                  </span>
-                                </p>
-                            </div>
+                {/* Filter and Search Sub-Bar */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900/40 border border-slate-800/80 p-2.5 rounded-2xl">
+                    <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 sm:pb-0">
+                        {categories.map((cat) => (
+                            <button
+                                key={cat}
+                                type="button"
+                                onClick={() => setSelectedCategory(cat)}
+                                className={`px-3 py-1 rounded-xl text-xs font-bold uppercase tracking-wider whitespace-nowrap transition ${
+                                    selectedCategory === cat
+                                        ? 'bg-sky-500 text-slate-950 shadow-sm'
+                                        : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white'
+                                }`}
+                            >
+                                {cat}
+                            </button>
+                        ))}
+                    </div>
 
-                            {isOwner ? (
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => toggleActiveStatus(item.id, item.is_active)}
-                                        className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-                                        title={item.is_active ? 'Deactivate' : 'Activate'}
-                                    >
-                                        {item.is_active ? (
-                                            <CheckCircle className="w-4 h-4 text-emerald-400" />
-                                        ) : (
-                                            <XCircle className="w-4 h-4 text-slate-500" />
+                    <div className="relative w-full sm:w-64">
+                        <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-500" />
+                        <input
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder="Search items..."
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-7 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 transition"
+                        />
+                        {searchQuery && (
+                            <button
+                                type="button"
+                                onClick={() => setSearchQuery('')}
+                                className="absolute right-2 top-2 text-slate-500 hover:text-white"
+                            >
+                                <X className="w-3.5 h-3.5" />
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* Catalog Items Grid (Responsive 3-to-4 Columns) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                    {filteredItems.map((item) => {
+                        const unitSuffix = getUnitSuffix(item.pricing_type);
+
+                        return (
+                            <div
+                                key={item.id}
+                                className={`border rounded-2xl p-4 flex flex-col justify-between transition ${
+                                    item.is_active
+                                        ? 'bg-slate-900 border-slate-800'
+                                        : 'bg-slate-900/30 border-slate-800/40 opacity-60'
+                                }`}
+                            >
+                                <div className="space-y-1.5">
+                                    <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                      {item.category}
+                    </span>
+
+                                        {item.minimum_quantity > 0 && (
+                                            <span className="text-[10px] text-amber-400 font-mono">
+                        Min {item.minimum_quantity} {unitSuffix}
+                      </span>
                                         )}
-                                    </button>
+                                    </div>
 
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setSelectedItem(item);
-                                            setIsModalOpen(true);
-                                        }}
-                                        className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-                                        title="Edit Rate"
-                                    >
-                                        <Edit2 className="w-4 h-4 text-sky-400" />
-                                    </button>
+                                    <h3 className="font-semibold text-sm text-white line-clamp-2">{item.name}</h3>
+
+                                    <p className="font-mono text-base font-bold text-sky-400">
+                                        {formatPHP(item.unit_price)}{' '}
+                                        <span className="text-xs font-normal text-slate-400">
+                      / {item.pricing_type.replace('_', ' ')}
+                    </span>
+                                    </p>
                                 </div>
-                            ) : (
-                                <div className="p-2 text-slate-600" title="Locked - Owner permission required to edit">
-                                    <Lock className="w-4 h-4" />
+
+                                {/* Card Bottom Controls */}
+                                <div className="pt-3 border-t border-slate-800/80 mt-3 flex items-center justify-between">
+                  <span
+                      className={`text-[10px] font-bold uppercase tracking-wider ${
+                          item.is_active ? 'text-emerald-400' : 'text-slate-500'
+                      }`}
+                  >
+                    {item.is_active ? 'Active' : 'Inactive'}
+                  </span>
+
+                                    {isOwner ? (
+                                        <div className="flex items-center gap-1.5">
+                                            <button
+                                                type="button"
+                                                onClick={() => toggleActiveStatus(item.id, item.is_active)}
+                                                className={`p-1.5 rounded-xl border transition ${
+                                                    item.is_active
+                                                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                                                        : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-white'
+                                                }`}
+                                                title={item.is_active ? 'Deactivate' : 'Activate'}
+                                            >
+                                                {item.is_active ? (
+                                                    <CheckCircle className="w-4 h-4" />
+                                                ) : (
+                                                    <XCircle className="w-4 h-4" />
+                                                )}
+                                            </button>
+
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setSelectedItem(item);
+                                                    setIsModalOpen(true);
+                                                }}
+                                                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-400 transition"
+                                                title="Edit Rate"
+                                            >
+                                                <Edit2 className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="p-1.5 text-slate-600" title="Locked - Owner permission required to edit">
+                                            <Lock className="w-3.5 h-3.5" />
+                                        </div>
+                                    )}
                                 </div>
-                            )}
-                        </div>
-                    ))}
+                            </div>
+                        );
+                    })}
                 </div>
             </main>
 
