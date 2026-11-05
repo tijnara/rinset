@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { CatalogItem, Order } from '@/types/database';
 import { useCatalog } from '@/features/pos/hooks/useCatalog';
@@ -14,7 +14,14 @@ import { ReceiptModal } from '@/features/pos/components/ReceiptModal';
 import { CashOutModal } from '@/features/audit/components/CashOutModal';
 import { Navbar } from '@/components/layout/Navbar';
 import { formatPHP } from '@/lib/formatters';
-import { ShoppingBag, ChevronUp, CheckCircle2, MinusCircle } from 'lucide-react';
+import {
+    ShoppingBag,
+    ChevronUp,
+    CheckCircle2,
+    MinusCircle,
+    Search,
+    X,
+} from 'lucide-react';
 
 export function POSView() {
     const {
@@ -30,12 +37,58 @@ export function POSView() {
     const breakdown = getBreakdown();
     const { logExpense } = useAudit();
 
+    const [searchQuery, setSearchQuery] = useState('');
     const [activeWeightItem, setActiveWeightItem] = useState<CatalogItem | null>(null);
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
     const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
     const [isCashOutOpen, setIsCashOutOpen] = useState(false);
     const [completedOrder, setCompletedOrder] = useState<string | null>(null);
     const [lastCreatedOrder, setLastCreatedOrder] = useState<Order | null>(null);
+
+    const searchInputRef = useRef<HTMLInputElement>(null);
+
+    // Filter items by category and search
+    const filteredCatalog = useMemo(() => {
+        let list = catalog;
+        if (selectedCategory !== 'ALL') {
+            list = list.filter((item) => item.category.toUpperCase() === selectedCategory.toUpperCase());
+        }
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            list = list.filter(
+                (item) =>
+                    item.name.toLowerCase().includes(q) ||
+                    item.category.toLowerCase().includes(q) ||
+                    item.pricing_type.toLowerCase().includes(q)
+            );
+        }
+        return list;
+    }, [catalog, selectedCategory, searchQuery]);
+
+    // Keyboard Shortcuts
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            const target = e.target as HTMLElement;
+            const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
+
+            if (e.key === '/' && !isInput) {
+                e.preventDefault();
+                searchInputRef.current?.focus();
+            } else if (e.key === 'F8') {
+                e.preventDefault();
+                if (items.length > 0) setIsCheckoutOpen(true);
+            } else if (e.key === 'F9') {
+                e.preventDefault();
+                setIsCashOutOpen(true);
+            } else if (e.key === 'Escape') {
+                if (searchQuery) setSearchQuery('');
+                setIsMobileCartOpen(false);
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [items.length, searchQuery]);
 
     const handleItemSelect = (item: CatalogItem) => {
         if (item.pricing_type === 'per_kilo') {
@@ -45,28 +98,70 @@ export function POSView() {
         }
     };
 
+    const handleEditItemWeight = (cartItemId: string) => {
+        const foundCatalogItem = catalog.find((c) => c.id === cartItemId);
+        if (foundCatalogItem) {
+            setActiveWeightItem(foundCatalogItem);
+            return;
+        }
+
+        const existingCartItem = items.find((i) => i.id === cartItemId);
+        if (existingCartItem) {
+            setActiveWeightItem({
+                id: existingCartItem.id,
+                store_id: storeId || '',
+                name: existingCartItem.name,
+                category: 'services',
+                pricing_type: 'per_kilo',
+                unit_price: existingCartItem.unitPrice,
+                minimum_quantity: 0,
+                is_active: true,
+                created_at: '',
+            } as CatalogItem);
+        }
+    };
+
     const totalItemCount = items.reduce(
         (acc, curr) => acc + (curr.pricingType === 'per_kilo' ? 1 : curr.quantity),
         0
     );
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none pb-20 lg:pb-0">
+        <div className="fixed inset-0 top-0 left-0 right-0 bottom-0 w-screen h-screen overflow-hidden bg-slate-950 text-slate-100 flex flex-col font-sans select-none z-0">
+            {/* 1. Header (Fixed 56px) */}
             <Navbar storeName={storeName} />
 
-            <div className="flex-1 flex flex-col lg:flex-row min-h-0">
-                {/* Catalog Panel */}
-                <div className="flex-1 flex flex-col min-w-0 overflow-visible lg:overflow-y-auto lg:h-[calc(100vh-3.5rem)]">
-                    {/* COMBINED STICKY HEADER: Locks right below the 56px Navbar (top-14) on mobile */}
-                    <div className="sticky top-14 lg:top-0 z-20 bg-slate-950/98 backdrop-blur border-b border-slate-800 shadow-md">
-                        {/* Row 1: Sub-bar (Title + Mobile Ticket trigger + Quick Cash Out) */}
-                        <div className="px-3 sm:px-4 py-2 bg-slate-900/60 border-b border-slate-800/80 flex justify-between items-center">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Service & Retail Menu
-              </span>
+            {/* 2. Main Body Split (100% of remaining screen height) */}
+            <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden w-full">
+                {/* Left Column: Full-Height Catalog */}
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-slate-950">
+                    {/* Sticky Controls Header */}
+                    <div className="flex-shrink-0 bg-slate-950/98 border-b border-slate-800 shadow-sm z-10">
+                        <div className="px-3 sm:px-5 py-2.5 bg-slate-900/60 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-2.5">
+                            <div className="flex items-center space-x-3 flex-1 min-w-[200px] max-w-md">
+                                <div className="relative w-full">
+                                    <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-500" />
+                                    <input
+                                        ref={searchInputRef}
+                                        type="text"
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        placeholder="Search menu... (Press '/' to focus)"
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-7 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 transition"
+                                    />
+                                    {searchQuery && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setSearchQuery('')}
+                                            className="absolute right-2 top-2 text-slate-500 hover:text-white"
+                                        >
+                                            <X className="w-3.5 h-3.5" />
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
 
                             <div className="flex items-center space-x-2">
-                                {/* Mobile Ticket Button */}
                                 <button
                                     type="button"
                                     onClick={() => setIsMobileCartOpen(true)}
@@ -98,41 +193,66 @@ export function POSView() {
                                 <button
                                     type="button"
                                     onClick={() => setIsCashOutOpen(true)}
-                                    className="h-8 px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 active:bg-rose-600 active:text-white border border-rose-500/20 text-rose-400 font-bold text-xs flex items-center space-x-1.5 transition"
+                                    className="h-8 px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 active:bg-rose-600 active:text-white border border-rose-500/25 text-rose-400 font-bold text-xs flex items-center space-x-1.5 transition"
+                                    title="Quick Cash Out (F9)"
                                 >
                                     <MinusCircle className="w-3.5 h-3.5 flex-shrink-0" />
                                     <span>Quick Cash Out</span>
+                                    <span className="hidden xl:inline text-[10px] opacity-70 font-mono">[F9]</span>
                                 </button>
                             </div>
                         </div>
 
-                        {/* Row 2: Category Filter Pills (ALL, RETAIL, BULKY, SERVICES, SPECIALTY) */}
-                        <div className="px-3 sm:px-4 py-2 overflow-x-auto flex items-center space-x-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-                            {categories.map((cat) => (
-                                <button
-                                    key={cat}
-                                    type="button"
-                                    onClick={() => setSelectedCategory(cat)}
-                                    className={`px-4 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider whitespace-nowrap transition active:scale-95 ${
-                                        selectedCategory === cat
-                                            ? 'bg-sky-500 text-slate-950 shadow-md'
-                                            : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white'
-                                    }`}
-                                >
-                                    {cat}
-                                </button>
-                            ))}
+                        {/* Category Filter Pills */}
+                        <div className="px-3 sm:px-5 py-2 overflow-x-auto flex items-center space-x-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                            {categories.map((cat) => {
+                                const count =
+                                    cat === 'ALL'
+                                        ? catalog.length
+                                        : catalog.filter((c) => c.category.toUpperCase() === cat.toUpperCase()).length;
+
+                                return (
+                                    <button
+                                        key={cat}
+                                        type="button"
+                                        onClick={() => setSelectedCategory(cat)}
+                                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider whitespace-nowrap transition active:scale-95 flex items-center space-x-1.5 ${
+                                            selectedCategory === cat
+                                                ? 'bg-sky-500 text-slate-950 shadow-md'
+                                                : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white'
+                                        }`}
+                                    >
+                                        <span>{cat}</span>
+                                        <span
+                                            className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+                                                selectedCategory === cat
+                                                    ? 'bg-slate-950 text-sky-400'
+                                                    : 'bg-slate-800 text-slate-400'
+                                            }`}
+                                        >
+                      {count}
+                    </span>
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
 
-                    {/* Catalog Cards Grid */}
-                    <CatalogGrid
-                        items={catalog}
-                        onItemSelect={(item) => handleItemSelect(item)}
-                    />
+                    {/* Catalog Scroll Body */}
+                    <div className="flex-1 min-h-0 overflow-y-auto">
+                        <CatalogGrid
+                            items={filteredCatalog}
+                            cartItems={items}
+                            onItemSelect={handleItemSelect}
+                            onClearSearch={() => {
+                                setSearchQuery('');
+                                setSelectedCategory('ALL');
+                            }}
+                        />
+                    </div>
                 </div>
 
-                {/* Active Ticket Sidebar (Desktop side-by-side & Mobile drawer) */}
+                {/* Right Column: Full-Height Ticket Sidebar */}
                 <CartSidebar
                     isOpenOnMobile={isMobileCartOpen}
                     onCloseMobile={() => setIsMobileCartOpen(false)}
@@ -140,12 +260,13 @@ export function POSView() {
                         setIsMobileCartOpen(false);
                         setIsCheckoutOpen(true);
                     }}
+                    onEditItemWeight={handleEditItemWeight}
                 />
             </div>
 
             {/* Floating Bottom Ticket Bar on Mobile */}
             {items.length > 0 && !isMobileCartOpen && (
-                <div className="lg:hidden fixed bottom-14 left-3 right-3 z-30 animate-in fade-in slide-in-from-bottom-2 duration-150">
+                <div className="lg:hidden fixed bottom-16 left-3 right-3 z-30 animate-in fade-in slide-in-from-bottom-2 duration-150">
                     <button
                         type="button"
                         onClick={() => setIsMobileCartOpen(true)}
