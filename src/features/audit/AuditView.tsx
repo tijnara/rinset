@@ -25,13 +25,11 @@ export function AuditView() {
     const [showDenominations, setShowDenominations] = useState(false);
     const [actualCashCounted, setActualCashCounted] = useState<number>(0);
 
-    // Safely calculate variance directly inside the view
     const expectedCash = metrics.expectedCashInDrawer ?? 0;
     const cashDiscrepancy = actualCashCounted > 0 ? actualCashCounted - expectedCash : 0;
     const grossSales = metrics.totalGrossSales ?? metrics.totalSales ?? 0;
     const expenseList = metrics.expenses ?? [];
 
-    // Denomination counter state
     const [denominations, setDenominations] = useState<Record<number, number>>({
         1000: 0,
         500: 0,
@@ -68,7 +66,7 @@ export function AuditView() {
     });
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none pb-16 md:pb-0">
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
             <Navbar storeName={storeName} />
 
             <main className="flex-1 p-3 sm:p-4 md:p-6 max-w-5xl w-full mx-auto space-y-4">
@@ -314,8 +312,9 @@ export function AuditView() {
                 </div>
             </main>
 
-            <footer className="py-6 pb-20 md:pb-8 text-center border-t border-slate-900 mt-8 select-none">
-                <p className="text-[11px] text-slate-600 font-mono tracking-wider">
+            {/* App Footer */}
+            <footer className="py-6 pb-24 lg:pb-8 text-center border-t border-slate-800/80 mt-auto select-none bg-slate-950">
+                <p className="text-xs text-slate-400 font-mono tracking-wider">
                     Rinset 2026 by tijnara
                 </p>
             </footer>

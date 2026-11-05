@@ -379,9 +379,9 @@ export function CatalogManagerView() {
                 </div>
             )}
 
-            {/* Fixed Non-Editable App Footer */}
-            <footer className="py-6 pb-20 md:pb-8 text-center border-t border-slate-900 mt-10 select-none">
-                <p className="text-[11px] text-slate-600 font-mono tracking-wider">
+            {/* App Footer */}
+            <footer className="py-6 pb-24 lg:pb-8 text-center border-t border-slate-800/80 mt-auto select-none bg-slate-950">
+                <p className="text-xs text-slate-400 font-mono tracking-wider">
                     Rinset 2026 by tijnara
                 </p>
             </footer>
