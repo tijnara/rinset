@@ -4,7 +4,7 @@ import { useCartStore } from '@/features/pos/store/useCartStore';
 import { CustomerAutocomplete } from './CustomerAutocomplete';
 import { formatPHP } from '@/lib/formatters';
 import { Bubbles } from '@/components/icons/Bubbles';
-import { ShoppingBag, Trash2, Plus, Minus, Tag, X } from 'lucide-react';
+import { ShoppingBag, Trash2, Plus, Minus, Tag, X, RotateCcw } from 'lucide-react';
 
 interface CartSidebarProps {
     isOpenOnMobile?: boolean;
@@ -32,15 +32,27 @@ export function CartSidebar({
 
     const breakdown = getBreakdown();
 
+    const handleClear = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        clearCart();
+    };
+
+    const handleClose = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onCloseMobile?.();
+    };
+
     return (
         <aside
-            className={`w-full lg:w-96 bg-slate-900 border-t lg:border-t-0 lg:border-l border-slate-800 flex flex-col h-full flex-shrink-0 ${
+            className={`w-full lg:w-96 bg-slate-900 border-t lg:border-t-0 lg:border-l border-slate-800 flex flex-col flex-shrink-0 select-none ${
                 isOpenOnMobile
-                    ? 'fixed inset-0 z-50 lg:static bg-slate-950'
-                    : 'hidden lg:flex'
+                    ? 'fixed inset-0 z-50 bg-slate-950 flex flex-col h-screen h-[100dvh]'
+                    : 'hidden lg:flex h-full'
             }`}
         >
-            {/* 1. Header */}
+            {/* 1. Header with Separated Clear and Close Actions */}
             <div className="h-14 px-4 border-b border-slate-800 flex justify-between items-center bg-slate-900 flex-shrink-0">
                 <div className="flex items-center space-x-2">
                     <ShoppingBag className="w-5 h-5 text-sky-400" />
@@ -56,18 +68,20 @@ export function CartSidebar({
                     {breakdown.items.length > 0 && (
                         <button
                             type="button"
-                            onClick={clearCart}
-                            className="text-xs text-slate-500 hover:text-rose-400 font-medium transition px-2 py-1"
+                            onClick={handleClear}
+                            className="h-8 px-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 active:bg-rose-600 active:text-white border border-rose-500/25 text-rose-400 text-xs font-bold flex items-center space-x-1 transition shadow-sm"
+                            title="Clear all ticket items"
                         >
-                            Clear
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Clear</span>
                         </button>
                     )}
 
                     {isOpenOnMobile && (
                         <button
                             type="button"
-                            onClick={onCloseMobile}
-                            className="lg:hidden w-8 h-8 rounded-xl bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center transition active:bg-slate-700"
+                            onClick={handleClose}
+                            className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition active:bg-slate-700 ml-1"
                             aria-label="Close ticket drawer"
                         >
                             <X className="w-4 h-4" />
@@ -98,8 +112,8 @@ export function CartSidebar({
                 />
             </div>
 
-            {/* 3. Items List */}
-            <div className="flex-1 overflow-y-auto p-3.5 space-y-2 min-h-0">
+            {/* 3. Items List (Capped at 4 visible cards on desktop, scrolls when exceeded) */}
+            <div className="flex-1 min-h-0 lg:max-h-[335px] overflow-y-auto p-3.5 pr-2.5 space-y-2 overscroll-contain [scrollbar-width:thin] [scrollbar-color:#334155_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-slate-950/50 [&::-webkit-scrollbar-thumb]:bg-slate-700 hover:[&::-webkit-scrollbar-thumb]:bg-sky-500 [&::-webkit-scrollbar-thumb]:rounded-full">
                 {breakdown.items.length === 0 ? (
                     <div className="h-48 flex flex-col items-center justify-center text-slate-500 text-xs space-y-2 select-none">
                         <Bubbles className="w-8 h-8 stroke-1 text-slate-600" />
@@ -159,7 +173,7 @@ export function CartSidebar({
             </div>
 
             {/* 4. Totals & Checkout Button */}
-            <div className="p-4 border-t border-slate-800 bg-slate-950 space-y-3 flex-shrink-0">
+            <div className="p-4 border-t border-slate-800 bg-slate-950 space-y-3 flex-shrink-0 mt-auto">
                 <div className="space-y-1.5 text-xs font-mono">
                     <div className="flex justify-between text-slate-400">
                         <span>Subtotal</span>

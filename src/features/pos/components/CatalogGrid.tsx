@@ -5,43 +5,21 @@ import { formatPHP } from '@/lib/formatters';
 
 interface CatalogGridProps {
     items: CatalogItem[];
-    categories: string[];
-    selectedCategory: string;
-    onSelectCategory: (category: string) => void;
+    categories?: string[];
+    selectedCategory?: string;
+    onSelectCategory?: (category: string) => void;
     onItemSelect: (item: CatalogItem) => void;
 }
 
-export function CatalogGrid({
-                                items,
-                                categories,
-                                selectedCategory,
-                                onSelectCategory,
-                                onItemSelect,
-                            }: CatalogGridProps) {
+export function CatalogGrid({ items, onItemSelect }: CatalogGridProps) {
     return (
-        <div className="flex-1 flex flex-col overflow-y-auto p-4 md:p-6 pb-40 md:pb-32 lg:pb-6">
-            {/* Category Tabs */}
-            <div className="flex items-center space-x-2 overflow-x-auto pb-3 mb-2 scrollbar-none">
-                {categories.map((cat) => (
-                    <button
-                        key={cat}
-                        onClick={() => onSelectCategory(cat)}
-                        className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider whitespace-nowrap transition ${
-                            selectedCategory === cat
-                                ? 'bg-sky-500 text-slate-950 shadow-md'
-                                : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white'
-                        }`}
-                    >
-                        {cat}
-                    </button>
-                ))}
-            </div>
-
+        <div className="p-3 sm:p-4 md:p-6 pb-36 lg:pb-6">
             {/* Grid of Catalog Cards */}
             <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
                 {items.map((item) => (
                     <button
                         key={item.id}
+                        type="button"
                         onClick={() => onItemSelect(item)}
                         className="bg-slate-900/90 border border-slate-800/90 hover:border-sky-500/50 active:scale-[0.98] rounded-2xl p-4 flex flex-col justify-between text-left transition h-36 relative group shadow-sm"
                     >
