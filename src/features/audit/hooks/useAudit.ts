@@ -2,138 +2,216 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { StoreExpense, ExpenseCategory } from '@/types/database';
+import { useAuthStore } from '@/features/auth/store/useAuthStore';
 
-export interface DailyAuditMetrics {
-    totalOrdersCount: number;
-    grossSales: number;
-    cashSales: number;
-    gcashSales: number;
-    totalExpenses: number;
-    expectedCashInDrawer: number;
-    expenses: StoreExpense[];
+export interface ExpenseRecord {
+    id: string;
+    store_id: string;
+    category: string;
+    description: string;
+    amount: number;
+    recorded_by: string;
+    created_at: string;
 }
 
-export function useAudit() {
-    const [storeId, setStoreId] = useState<string>('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11');
-    const [storeName, setStoreName] = useState<string>('Rinset Laundry');
-    const [isLoading, setIsLoading] = useState<boolean>(true);
-    const [actualCashCounted, setActualCashCounted] = useState<number>(0);
+export interface AuditMetrics {
+    totalOrdersCount: number;
+    orderCount: number;
+    activeOrdersCount: number;
+    claimedOrdersCount: number;
+    totalSales: number;
+    totalGrossSales: number;
+    cashSales: number;
+    gcashSales: number;
+    pettyCashOut: number;
+    totalExpenses: number;
+    expectedCashInDrawer: number;
+    netCashInDrawer: number;
+    unpaidBalance: number;
+    unpaidReceivables: number;
+    expenses: ExpenseRecord[];
+    orders: any[];
+}
 
-    const [metrics, setMetrics] = useState<DailyAuditMetrics>({
-        totalOrdersCount: 0,
-        grossSales: 0,
-        cashSales: 0,
-        gcashSales: 0,
-        totalExpenses: 0,
-        expectedCashInDrawer: 0,
-        expenses: [],
-    });
+const DEFAULT_METRICS: AuditMetrics = {
+    totalOrdersCount: 0,
+    orderCount: 0,
+    activeOrdersCount: 0,
+    claimedOrdersCount: 0,
+    totalSales: 0,
+    totalGrossSales: 0,
+    cashSales: 0,
+    gcashSales: 0,
+    pettyCashOut: 0,
+    totalExpenses: 0,
+    expectedCashInDrawer: 0,
+    netCashInDrawer: 0,
+    unpaidBalance: 0,
+    unpaidReceivables: 0,
+    expenses: [],
+    orders: [],
+};
 
-    const supabase = createClient();
+export function useAudit(customDate?: string) {
+    const storeId = useAuthStore((state) => state.storeId);
+    const storeName = useAuthStore((state) => state.storeName);
 
-    const fetchDailyAudit = useCallback(async () => {
-        setIsLoading(true);
+    const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
+    const [orders, setOrders] = useState<any[]>([]);
+    const [metrics, setMetrics] = useState<AuditMetrics>(DEFAULT_METRICS);
+    const [manilaDateStr, setManilaDateStr] = useState<string>(customDate || '');
+    const [loading, setLoading] = useState(true);
 
-        const { data: store } = await supabase.from('stores').select('id, name').limit(1).single();
-        if (store) {
-            setStoreId(store.id);
-            setStoreName(store.name);
+    const computeManilaBounds = useCallback((targetDateStr?: string) => {
+        const manilaDate =
+            targetDateStr ||
+            new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date());
+
+        const startISO = new Date(`${manilaDate}T00:00:00+08:00`).toISOString();
+        const endISO = new Date(`${manilaDate}T23:59:59.999+08:00`).toISOString();
+
+        return { manilaDate, startISO, endISO };
+    }, []);
+
+    const loadAuditData = useCallback(async () => {
+        // Only fetch if a valid storeId is actively loaded
+        if (!storeId || storeId.length < 20) {
+            setLoading(false);
+            return;
         }
 
-        // Set Manila Day Boundaries (+08:00)
-        const now = new Date();
-        const manilaDateString = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }); // YYYY-MM-DD
-        const startOfDay = new Date(`${manilaDateString}T00:00:00+08:00`).toISOString();
-        const endOfDay = new Date(`${manilaDateString}T23:59:59.999+08:00`).toISOString();
+        setLoading(true);
+        const supabase = createClient();
+        const { manilaDate, startISO, endISO } = computeManilaBounds(customDate);
+        setManilaDateStr(manilaDate);
 
-        // 1. Fetch Today's Payments
-        const { data: payments } = await supabase
-            .from('payments')
+        // 1. Fetch expenses for target shift
+        const { data: expenseData, error: expenseError } = await supabase
+            .from('expenses')
             .select('*')
-            .gte('created_at', startOfDay)
-            .lte('created_at', endOfDay);
-
-        // 2. Fetch Today's Store Expenses
-        const { data: expenses } = await supabase
-            .from('store_expenses')
-            .select('*')
-            .gte('created_at', startOfDay)
-            .lte('created_at', endOfDay)
+            .eq('store_id', storeId)
+            .gte('created_at', startISO)
+            .lte('created_at', endISO)
             .order('created_at', { ascending: false });
 
-        // 3. Fetch Today's Orders count
-        const { count: ordersCount } = await supabase
-            .from('orders')
-            .select('*', { count: 'exact', head: true })
-            .gte('created_at', startOfDay)
-            .lte('created_at', endOfDay);
-
-        const cashSales = (payments || [])
-            .filter((p) => p.payment_method === 'cash')
-            .reduce((sum, p) => sum + Number(p.amount || 0), 0);
-
-        const gcashSales = (payments || [])
-            .filter((p) => p.payment_method === 'gcash')
-            .reduce((sum, p) => sum + Number(p.amount || 0), 0);
-
-        const totalExpenses = (expenses || []).reduce(
-            (sum, e) => sum + Number(e.amount || 0),
-            0
-        );
-
-        const expectedCashInDrawer = Math.max(0, cashSales - totalExpenses);
-
-        setMetrics({
-            totalOrdersCount: ordersCount || 0,
-            grossSales: cashSales + gcashSales,
-            cashSales,
-            gcashSales,
-            totalExpenses,
-            expectedCashInDrawer,
-            expenses: (expenses as StoreExpense[]) || [],
-        });
-
-        setIsLoading(false);
-    }, [supabase]);
-
-    useEffect(() => {
-        fetchDailyAudit();
-    }, [fetchDailyAudit]);
-
-    const logExpense = async (expense: {
-        amount: number;
-        category: ExpenseCategory;
-        description: string;
-    }): Promise<boolean> => {
-        const { error } = await supabase.from('store_expenses').insert({
-            store_id: storeId,
-            amount: expense.amount,
-            category: expense.category,
-            description: expense.description,
-            recorded_by: 'Shift Cashier',
-        });
-
-        if (error) {
-            console.error('Error logging expense:', error);
-            return false;
+        if (expenseError) {
+            console.warn('[useAudit] Expenses query error:', expenseError.message);
         }
 
-        await fetchDailyAudit();
+        const currentExpenses = (expenseData as ExpenseRecord[]) || [];
+        setExpenses(currentExpenses);
+
+        // 2. Fetch orders using select('*') to prevent 400 on missing cherry-picked columns
+        const { data: orderData, error: orderError } = await supabase
+            .from('orders')
+            .select('*')
+            .eq('store_id', storeId)
+            .gte('created_at', startISO)
+            .lte('created_at', endISO);
+
+        if (orderError) {
+            console.error('[useAudit] Orders query error:', orderError.message, orderError.details);
+        }
+
+        const currentOrders = orderData || [];
+        setOrders(currentOrders);
+
+        let cashSales = 0;
+        let gcashSales = 0;
+        let unpaidReceivables = 0;
+        let claimedCount = 0;
+        let activeCount = 0;
+
+        currentOrders.forEach((ord: any) => {
+            // Support common column names dynamically
+            const amt = Number(ord.net_payable ?? ord.total_amount ?? ord.total_price ?? ord.total ?? 0);
+            const paymentStatus = ord.payment_status ?? (ord.is_paid ? 'paid' : 'unpaid');
+            const paymentMethod = (ord.payment_method ?? ord.payment_mode ?? 'cash').toLowerCase();
+
+            if (paymentStatus === 'paid') {
+                if (paymentMethod === 'cash') cashSales += amt;
+                else gcashSales += amt;
+            } else {
+                unpaidReceivables += amt;
+            }
+
+            if (ord.status === 'claimed') claimedCount++;
+            else activeCount++;
+        });
+
+        const totalGrossSales = cashSales + gcashSales;
+        const totalExpenses = currentExpenses.reduce(
+            (acc, curr) => acc + Number(curr.amount || 0),
+            0
+        );
+        const netCashInDrawer = cashSales - totalExpenses;
+
+        const computedMetrics: AuditMetrics = {
+            totalOrdersCount: currentOrders.length,
+            orderCount: currentOrders.length,
+            activeOrdersCount: activeCount,
+            claimedOrdersCount: claimedCount,
+            totalSales: totalGrossSales,
+            totalGrossSales,
+            cashSales,
+            gcashSales,
+            pettyCashOut: totalExpenses,
+            totalExpenses,
+            expectedCashInDrawer: netCashInDrawer,
+            netCashInDrawer,
+            unpaidBalance: unpaidReceivables,
+            unpaidReceivables,
+            expenses: currentExpenses,
+            orders: currentOrders,
+        };
+
+        setMetrics(computedMetrics);
+        setLoading(false);
+    }, [storeId, customDate, computeManilaBounds]);
+
+    const logExpense = async (expense: {
+        category: string;
+        description: string;
+        amount: number;
+        recordedBy?: string;
+    }) => {
+        const activeStoreId = storeId || useAuthStore.getState().storeId;
+        if (!activeStoreId) throw new Error('Active store ID required to log expense.');
+
+        const supabase = createClient();
+        const { error } = await supabase.from('expenses').insert({
+            store_id: activeStoreId,
+            category: expense.category,
+            description: expense.description,
+            amount: expense.amount,
+            recorded_by: expense.recordedBy || 'Shift Cashier',
+        });
+
+        if (error) throw error;
+        await loadAuditData();
         return true;
     };
 
-    const cashDiscrepancy = actualCashCounted - metrics.expectedCashInDrawer;
+    useEffect(() => {
+        if (!customDate) {
+            const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date());
+            setManilaDateStr(today);
+        }
+        loadAuditData();
+    }, [loadAuditData, customDate]);
 
     return {
         metrics,
-        storeId,
+        summary: metrics,
+        expenses,
+        orders,
+        manilaDateStr,
         storeName,
-        isLoading,
-        actualCashCounted,
-        setActualCashCounted,
-        cashDiscrepancy,
+        storeId,
+        loading,
+        isLoading: loading,
         logExpense,
-        refreshAudit: fetchDailyAudit,
+        saveExpense: logExpense,
+        refreshAudit: loadAuditData,
     };
 }

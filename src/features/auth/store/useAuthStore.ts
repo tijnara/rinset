@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { createClient } from '@/lib/supabase/client';
 
-export type UserRole = 'cashier' | 'owner';
+export type UserRole = 'cashier' | 'owner' | 'staff';
 
 export interface AuthUser {
     id: string;
@@ -12,17 +12,34 @@ export interface AuthUser {
     role: UserRole;
 }
 
+export interface StoreSessionData {
+    userId: string;
+    email?: string;
+    storeId: string;
+    storeName: string;
+    branchCode?: string;
+    role?: UserRole;
+    ownerPin?: string;
+}
+
 interface AuthState {
     user: AuthUser | null;
     isAuthenticated: boolean;
     isHydrated: boolean;
     ownerPin: string;
+    storeId: string | null;
+    storeName: string;
+    branchCode: string;
+
+    // Actions
     setHydrated: () => void;
+    setStore: (storeId: string, storeName: string, branchCode?: string) => void;
+    initializeSession: (session: StoreSessionData) => void;
     loginWithPin: (pin: string) => Promise<{ success: boolean; role?: UserRole; error?: string }>;
     verifyOwnerPin: (pin: string) => Promise<{ success: boolean; error?: string }>;
     changeOwnerPin: (currentPin: string, newPin: string) => Promise<{ success: boolean; error?: string }>;
     lockToCashier: () => void;
-    logout: () => void;
+    logout: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -32,45 +49,116 @@ export const useAuthStore = create<AuthState>()(
             isAuthenticated: true,
             isHydrated: false,
             ownerPin: '9999',
+            storeId: null,
+            storeName: 'Rinset Laundry',
+            branchCode: 'MAIN',
 
             setHydrated: () => set({ isHydrated: true }),
 
+            setStore: (storeId: string, storeName: string, branchCode = 'MAIN') => {
+                set({ storeId, storeName, branchCode });
+            },
+
+            initializeSession: (session: StoreSessionData) => {
+                const assignedRole: UserRole = session.role ?? 'owner';
+                set({
+                    user: {
+                        id: session.userId,
+                        name: assignedRole === 'owner' ? 'Store Owner' : 'Shift Cashier',
+                        role: assignedRole,
+                    },
+                    storeId: session.storeId,
+                    storeName: session.storeName,
+                    branchCode: session.branchCode ?? 'MAIN',
+                    ownerPin: session.ownerPin || get().ownerPin || '9999',
+                    isAuthenticated: true,
+                });
+            },
+
             loginWithPin: async (pin: string) => {
                 const activeOwnerPin = get().ownerPin || '9999';
+                const activeStoreId = get().storeId;
 
                 try {
                     const supabase = createClient();
 
-                    // 1. Check Supabase profiles table if available
-                    const { data: profile } = await supabase
+                    // 1. Check multi-tenant store_members table
+                    let query = supabase
+                        .from('store_members')
+                        .select(`
+              id,
+              role,
+              pin_code,
+              store_id,
+              user:profiles(id, full_name),
+              store:stores(id, name, branch_code)
+            `)
+                        .eq('pin_code', pin)
+                        .eq('is_active', true);
+
+                    if (activeStoreId) {
+                        query = query.eq('store_id', activeStoreId);
+                    }
+
+                    const { data: member } = await query.limit(1).maybeSingle();
+
+                    if (member) {
+                        const role: UserRole = member.role === 'owner' ? 'owner' : 'cashier';
+                        const profileData: any = Array.isArray(member.user) ? member.user[0] : member.user;
+                        const storeData: any = Array.isArray(member.store) ? member.store[0] : member.store;
+
+                        const user: AuthUser = {
+                            id: member.id,
+                            name: profileData?.full_name || (role === 'owner' ? 'Store Owner' : 'Shift Cashier'),
+                            role,
+                        };
+
+                        set({
+                            user,
+                            isAuthenticated: true,
+                            ...(role === 'owner' ? { ownerPin: pin } : {}),
+                            ...(storeData
+                                ? {
+                                    storeId: storeData.id,
+                                    storeName: storeData.name,
+                                    branchCode: storeData.branch_code || 'MAIN',
+                                }
+                                : {}),
+                        });
+
+                        return { success: true, role };
+                    }
+
+                    // 2. Fallback check for legacy profiles table if store_members has no match
+                    const { data: legacyProfile } = await supabase
                         .from('profiles')
                         .select('id, full_name, role, pin_code')
                         .eq('pin_code', pin)
                         .limit(1)
                         .maybeSingle();
 
-                    if (profile) {
-                        const role: UserRole = profile.role === 'owner' ? 'owner' : 'cashier';
+                    if (legacyProfile) {
+                        const role: UserRole = legacyProfile.role === 'owner' ? 'owner' : 'cashier';
                         const user: AuthUser = {
-                            id: profile.id,
-                            name: profile.full_name || (role === 'owner' ? 'Store Owner' : 'Shift Cashier'),
+                            id: legacyProfile.id,
+                            name: legacyProfile.full_name || (role === 'owner' ? 'Store Owner' : 'Shift Cashier'),
                             role,
                         };
-                        set({ user, isAuthenticated: true });
+                        set({ user, isAuthenticated: true, ...(role === 'owner' ? { ownerPin: pin } : {}) });
                         return { success: true, role };
                     }
                 } catch {
-                    // Fall through to offline credentials
+                    // Fall through to offline fallback credentials
                 }
 
-                // 2. Match against active Owner PIN (custom or default)
+                // 3. Match against active Owner PIN (custom or default '9999')
                 if (pin === activeOwnerPin) {
                     const user: AuthUser = { id: 'owner-master', name: 'Store Owner', role: 'owner' };
                     set({ user, isAuthenticated: true });
                     return { success: true, role: 'owner' };
                 }
 
-                // 3. Match against default Cashier PIN
+                // 4. Match against default Cashier PIN ('1234')
                 if (pin === '1234') {
                     const user: AuthUser = { id: 'cashier-shift', name: 'Shift Cashier', role: 'cashier' };
                     set({ user, isAuthenticated: true });
@@ -115,8 +203,15 @@ export const useAuthStore = create<AuthState>()(
 
                 try {
                     const supabase = createClient();
-                    const { user } = get();
-                    if (user?.id && user.id !== 'owner-master') {
+                    const { storeId, user } = get();
+
+                    if (storeId) {
+                        await supabase
+                            .from('store_members')
+                            .update({ pin_code: newPin })
+                            .eq('store_id', storeId)
+                            .eq('role', 'owner');
+                    } else if (user?.id && user.id !== 'owner-master') {
                         await supabase
                             .from('profiles')
                             .update({ pin_code: newPin })
@@ -137,8 +232,21 @@ export const useAuthStore = create<AuthState>()(
                 });
             },
 
-            logout: () => {
-                set({ user: null, isAuthenticated: false });
+            logout: async () => {
+                try {
+                    const supabase = createClient();
+                    await supabase.auth.signOut();
+                } catch {
+                    // Proceed with local state cleanup
+                }
+
+                set({
+                    user: null,
+                    isAuthenticated: false,
+                    storeId: null,
+                    storeName: 'Rinset Laundry',
+                    branchCode: 'MAIN',
+                });
             },
         }),
         {

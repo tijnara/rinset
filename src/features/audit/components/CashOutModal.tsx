@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ExpenseCategory } from '@/types/database';
+import { useAuthStore } from '@/features/auth/store/useAuthStore';
 import { formatPHP } from '@/lib/formatters';
 import { Bubbles } from '@/components/icons/Bubbles';
 import {
@@ -13,18 +14,20 @@ import {
     Loader2,
     Printer,
     Check,
+    AlertCircle,
 } from 'lucide-react';
 
 interface CashOutModalProps {
-    storeId: string;
-    storeName: string;
+    storeId?: string | null;
+    storeName?: string;
     isOpen: boolean;
     onClose: () => void;
     onSaveExpense: (expense: {
         amount: number;
         category: ExpenseCategory;
         description: string;
-    }) => Promise<boolean>;
+        recordedBy?: string;
+    }) => Promise<boolean | void>;
 }
 
 const PRESETS = [
@@ -59,21 +62,28 @@ const PRESETS = [
 ];
 
 export function CashOutModal({
-                                 storeId,
-                                 storeName,
+                                 storeId: propStoreId,
+                                 storeName: propStoreName,
                                  isOpen,
                                  onClose,
                                  onSaveExpense,
                              }: CashOutModalProps) {
+    const authStoreName = useAuthStore((state) => state.storeName);
+    const user = useAuthStore((state) => state.user);
+    const activeStoreName = propStoreName || authStoreName || 'Rinset Laundry';
+    const cashierName = user?.name || 'Shift Cashier';
+
     const [amount, setAmount] = useState<number>(250);
     const [category, setCategory] = useState<ExpenseCategory>('water_refill');
     const [description, setDescription] = useState<string>('5x 5-gallon purified water refill');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [lastVoucher, setLastVoucher] = useState<{
         amount: number;
         desc: string;
         category: string;
         time: string;
+        cashier: string;
     } | null>(null);
 
     if (!isOpen) return null;
@@ -86,27 +96,45 @@ export function CashOutModal({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (amount <= 0 || !description.trim()) return;
+        setErrorMessage(null);
+
+        if (amount <= 0 || !description.trim()) {
+            setErrorMessage('Please enter a valid amount and description.');
+            return;
+        }
 
         setIsSubmitting(true);
-        const success = await onSaveExpense({
-            amount,
-            category,
-            description: description.trim(),
-        });
-
-        setIsSubmitting(false);
-        if (success) {
-            setLastVoucher({
+        try {
+            const result = await onSaveExpense({
                 amount,
-                desc: description.trim(),
                 category,
-                time: new Date().toLocaleTimeString('en-US', {
-                    timeZone: 'Asia/Manila',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                }),
+                description: description.trim(),
+                recordedBy: cashierName,
             });
+
+            // Treat undefined/void or explicit true as success
+            if (result !== false) {
+                setLastVoucher({
+                    amount,
+                    desc: description.trim(),
+                    category,
+                    cashier: cashierName,
+                    time: new Date().toLocaleTimeString('en-US', {
+                        timeZone: 'Asia/Manila',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                    }),
+                });
+            } else {
+                setErrorMessage('Failed to record expense. Please try again.');
+            }
+        } catch (err: any) {
+            setErrorMessage(err.message || 'An error occurred while saving the voucher.');
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -114,8 +142,14 @@ export function CashOutModal({
         window.print();
     };
 
+    const handleClose = () => {
+        setLastVoucher(null);
+        setErrorMessage(null);
+        onClose();
+    };
+
     return (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150 select-none">
             <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-2xl flex flex-col space-y-4 max-h-[92vh] overflow-y-auto">
                 {/* Header */}
                 <div className="flex justify-between items-center border-b border-slate-800 pb-3">
@@ -129,12 +163,20 @@ export function CashOutModal({
                         </div>
                     </div>
                     <button
-                        onClick={onClose}
-                        className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800"
+                        type="button"
+                        onClick={handleClose}
+                        className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800 transition"
                     >
                         <X className="w-4 h-4" />
                     </button>
                 </div>
+
+                {errorMessage && (
+                    <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center space-x-2">
+                        <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                        <span>{errorMessage}</span>
+                    </div>
+                )}
 
                 {/* Voucher Success View */}
                 {lastVoucher ? (
@@ -151,7 +193,7 @@ export function CashOutModal({
                         {/* 58mm Thermal Voucher Printable Box */}
                         <div className="hidden print:block w-[58mm] bg-white text-black p-3 font-mono text-[10px] leading-tight mx-auto">
                             <div className="text-center pb-2 border-b border-dashed border-black">
-                                <h2 className="text-xs font-black uppercase">{storeName}</h2>
+                                <h2 className="text-xs font-black uppercase">{activeStoreName}</h2>
                                 <p className="text-[9px]">PETTY CASH EXPENSE VOUCHER</p>
                                 <p className="text-[8px] text-gray-600">{lastVoucher.time}</p>
                             </div>
@@ -162,6 +204,7 @@ export function CashOutModal({
                                 </div>
                                 <p><strong>Reason:</strong> {lastVoucher.desc}</p>
                                 <p><strong>Category:</strong> {lastVoucher.category}</p>
+                                <p><strong>Attendant:</strong> {lastVoucher.cashier}</p>
                             </div>
                             <div className="pt-3 text-[8px] space-y-3">
                                 <p>Cashier Signature: __________________</p>
@@ -173,15 +216,15 @@ export function CashOutModal({
                             <button
                                 type="button"
                                 onClick={handlePrintVoucher}
-                                className="flex-1 h-12 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 transition shadow"
+                                className="flex-1 h-12 bg-sky-500 hover:bg-sky-400 active:bg-sky-600 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 transition shadow"
                             >
                                 <Printer className="w-4 h-4" />
                                 <span>Print 58mm Voucher</span>
                             </button>
                             <button
                                 type="button"
-                                onClick={onClose}
-                                className="px-4 h-12 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs transition"
+                                onClick={handleClose}
+                                className="px-4 h-12 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-300 font-semibold rounded-xl text-xs transition"
                             >
                                 Done
                             </button>
@@ -227,7 +270,7 @@ export function CashOutModal({
                                 <label className="text-xs text-slate-400 block mb-1 font-semibold">Amount (PHP):</label>
                                 <input
                                     type="number"
-                                    step="5"
+                                    step="any"
                                     required
                                     value={amount || ''}
                                     onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
@@ -265,8 +308,13 @@ export function CashOutModal({
                             />
                         </div>
 
+                        <div className="flex justify-between items-center text-[11px] text-slate-400 pt-1">
+                            <span>Recorded by:</span>
+                            <span className="font-mono font-semibold text-slate-200">{cashierName}</span>
+                        </div>
+
                         <div className="p-3 bg-rose-950/20 border border-rose-900/40 rounded-xl text-[11px] text-rose-300">
-                            <strong>Notice:</strong> This immediately deducts from today's expected cash in the drawer and will be reflected on the daily Z-Reading audit slip.
+                            <strong>Notice:</strong> This immediately deducts from today&apos;s expected cash in the drawer and will be reflected on the daily Z-Reading audit slip.
                         </div>
 
                         <button

@@ -4,6 +4,7 @@ import { useState, ComponentType } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { OrderBasket, Order, OrderStatus } from '@/types/database';
 import { useLiveOrders } from '@/features/orders/hooks/useLiveOrders';
+import { useAuthStore } from '@/features/auth/store/useAuthStore';
 import { KanbanColumn } from '@/features/orders/components/KanbanColumn';
 import { SettleClaimModal } from '@/features/orders/components/SettleClaimModal';
 import { QrScannerModal } from '@/features/orders/components/QrScannerModal';
@@ -37,7 +38,12 @@ const LANES: LaneConfig[] = [
 ];
 
 export function LiveBoardView() {
-    const { baskets, storeName, updateBasketStatus, refreshOrders } = useLiveOrders();
+    const storeId = useAuthStore((state) => state.storeId);
+    const authStoreName = useAuthStore((state) => state.storeName);
+    const { baskets, storeName: hookStoreName, updateBasketStatus, refreshOrders } = useLiveOrders();
+
+    const storeName = authStoreName || hookStoreName || 'Rinset Laundry';
+
     const [searchQuery, setSearchQuery] = useState<string>('');
     const [orderToSettle, setOrderToSettle] = useState<Order | null>(null);
     const [isScannerOpen, setIsScannerOpen] = useState<boolean>(false);
@@ -51,9 +57,15 @@ export function LiveBoardView() {
 
     const filteredBaskets = baskets.filter((b) => {
         const q = searchQuery.toLowerCase();
-        const matchesTag = b.basket_tag.toLowerCase().includes(q);
-        const matchesNum = b.order?.order_number.toLowerCase().includes(q) ?? false;
-        const matchesCustomer = b.order?.customer?.full_name?.toLowerCase().includes(q) ?? false;
+        const matchesTag = b.basket_tag?.toLowerCase().includes(q) ?? false;
+        const matchesNum = b.order?.order_number?.toLowerCase().includes(q) ?? false;
+        // Safely support customer relation or direct field without TS2339
+        const customerDisplayName =
+            (b.order as any)?.customer_name ||
+            b.order?.customer?.full_name ||
+            (b.order?.customer as any)?.name ||
+            '';
+        const matchesCustomer = customerDisplayName.toLowerCase().includes(q);
         const matchesMachine = b.assigned_machine?.toLowerCase().includes(q) ?? false;
         const matchesLocation = b.order?.storage_location?.toLowerCase().includes(q) ?? false;
         return matchesTag || matchesNum || matchesCustomer || matchesMachine || matchesLocation;
@@ -63,13 +75,16 @@ export function LiveBoardView() {
         if (!storageTarget) return;
         const supabase = createClient();
 
-        // Save cubby location to the parent order
-        await supabase
+        let query = supabase
             .from('orders')
-            .update({ storage_location: location })
+            .update({ storage_location: location, updated_at: new Date().toISOString() })
             .eq('id', storageTarget.order_id);
 
-        // Advance basket to ready_for_pickup
+        if (storeId) {
+            query = query.eq('store_id', storeId);
+        }
+        await query;
+
         await updateBasketStatus(storageTarget.id, storageTarget.order_id, 'ready_for_pickup', null);
 
         setStorageTarget(null);

@@ -5,20 +5,24 @@ import { useCustomers, CustomerWithMetrics } from './hooks/useCustomers';
 import { CustomerDetailModal } from './components/CustomerDetailModal';
 import { AddCustomerModal } from './components/AddCustomerModal';
 import { Navbar } from '@/components/layout/Navbar';
+import { useAuthStore } from '@/features/auth/store/useAuthStore';
 import { formatPHP } from '@/lib/formatters';
 import { Users, Search, AlertCircle, Eye, UserPlus } from 'lucide-react';
 
 export function CustomerView() {
-    const { customers, storeName, createCustomer } = useCustomers();
+    const authStoreName = useAuthStore((state) => state.storeName);
+    const { customers, storeName: hookStoreName, createCustomer } = useCustomers();
+    const storeName = authStoreName || hookStoreName || 'Rinset Laundry';
+
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedCustomer, setSelectedCustomer] = useState<CustomerWithMetrics | null>(null);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
     const filtered = customers.filter((c) => {
         const q = searchQuery.toLowerCase();
-        const nameMatch = c.full_name.toLowerCase().includes(q);
+        const displayName = (c.full_name || (c as any).name || '').toLowerCase();
         const phoneMatch = c.mobile_number?.includes(q) ?? false;
-        return nameMatch || phoneMatch;
+        return displayName.includes(q) || phoneMatch;
     });
 
     return (
@@ -62,51 +66,55 @@ export function CustomerView() {
 
                 {/* Customer Cards Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {filtered.map((customer) => (
-                        <div
-                            key={customer.id}
-                            className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between hover:border-slate-700 transition space-y-3"
-                        >
-                            <div className="flex justify-between items-start">
-                                <div>
-                                    <h3 className="font-bold text-sm text-white">{customer.full_name}</h3>
-                                    <p className="text-xs font-mono text-slate-400 mt-0.5">
-                                        {customer.mobile_number || 'No mobile registered'}
-                                    </p>
-                                </div>
+                    {filtered.map((customer) => {
+                        const displayName = customer.full_name || (customer as any).name || 'Unnamed Customer';
 
-                                {customer.unpaidBalance > 0 && (
-                                    <span className="px-2 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/20 text-[10px] font-mono font-bold text-rose-400 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    Utang: {formatPHP(customer.unpaidBalance)}
-                  </span>
-                                )}
-                            </div>
-
-                            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-xs font-mono">
-                                <div>
-                                    <span className="text-[10px] text-slate-500 block">Visits</span>
-                                    <span className="font-bold text-slate-200">{customer.totalVisits}</span>
-                                </div>
-                                <div>
-                                    <span className="text-[10px] text-slate-500 block">Total Kg</span>
-                                    <span className="font-bold text-slate-200">{customer.totalWeightKg} kg</span>
-                                </div>
-                                <div>
-                                    <span className="text-[10px] text-slate-500 block">Paid</span>
-                                    <span className="font-bold text-emerald-400">{formatPHP(customer.totalSpent)}</span>
-                                </div>
-                            </div>
-
-                            <button
-                                onClick={() => setSelectedCustomer(customer)}
-                                className="w-full py-2 bg-slate-800 hover:bg-slate-700 active:bg-sky-500 active:text-slate-950 text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center space-x-1.5 transition"
+                        return (
+                            <div
+                                key={customer.id}
+                                className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between hover:border-slate-700 transition space-y-3"
                             >
-                                <Eye className="w-3.5 h-3.5" />
-                                <span>View Order History</span>
-                            </button>
-                        </div>
-                    ))}
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <h3 className="font-bold text-sm text-white">{displayName}</h3>
+                                        <p className="text-xs font-mono text-slate-400 mt-0.5">
+                                            {customer.mobile_number || 'No mobile registered'}
+                                        </p>
+                                    </div>
+
+                                    {customer.unpaidBalance > 0 && (
+                                        <span className="px-2 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/20 text-[10px] font-mono font-bold text-rose-400 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" />
+                      Utang: {formatPHP(customer.unpaidBalance)}
+                    </span>
+                                    )}
+                                </div>
+
+                                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-xs font-mono">
+                                    <div>
+                                        <span className="text-[10px] text-slate-500 block">Visits</span>
+                                        <span className="font-bold text-slate-200">{customer.totalVisits}</span>
+                                    </div>
+                                    <div>
+                                        <span className="text-[10px] text-slate-500 block">Total Kg</span>
+                                        <span className="font-bold text-slate-200">{customer.totalWeightKg} kg</span>
+                                    </div>
+                                    <div>
+                                        <span className="text-[10px] text-slate-500 block">Paid</span>
+                                        <span className="font-bold text-emerald-400">{formatPHP(customer.totalSpent)}</span>
+                                    </div>
+                                </div>
+
+                                <button
+                                    onClick={() => setSelectedCustomer(customer)}
+                                    className="w-full py-2 bg-slate-800 hover:bg-slate-700 active:bg-sky-500 active:text-slate-950 text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center space-x-1.5 transition"
+                                >
+                                    <Eye className="w-3.5 h-3.5" />
+                                    <span>View Order History</span>
+                                </button>
+                            </div>
+                        );
+                    })}
                 </div>
             </main>
 

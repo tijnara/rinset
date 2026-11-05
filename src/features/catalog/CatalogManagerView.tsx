@@ -24,9 +24,16 @@ import {
 } from 'lucide-react';
 
 export function CatalogManagerView() {
-    const { items, storeName, updateStoreName, saveItem, deleteItem, toggleActiveStatus } =
-        useCatalogManager();
+    const authStoreName = useAuthStore((state) => state.storeName);
+    const authStoreId = useAuthStore((state) => state.storeId);
+    const setStore = useAuthStore((state) => state.setStore);
     const { user, loginWithPin } = useAuthStore();
+
+    const { items, storeName: hookStoreName, updateStoreName, saveItem, deleteItem, toggleActiveStatus } =
+        useCatalogManager();
+
+    const storeName = authStoreName || hookStoreName || 'Rinset Laundry';
+
     const [selectedItem, setSelectedItem] = useState<CatalogItem | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isChangePinOpen, setIsChangePinOpen] = useState(false);
@@ -35,6 +42,30 @@ export function CatalogManagerView() {
     const [unlockError, setUnlockError] = useState<string | null>(null);
 
     const isOwner = user?.role === 'owner';
+
+    // Return the expected Promise<{ success: boolean; error?: string }>
+    const handleUpdateStoreName = async (
+        newName: string
+    ): Promise<{ success: boolean; error?: string }> => {
+        try {
+            const res: any = await updateStoreName(newName);
+            if (typeof res === 'object' && res !== null && 'success' in res) {
+                if (res.success && authStoreId) {
+                    setStore(authStoreId, newName);
+                }
+                return res;
+            }
+            if (res) {
+                if (authStoreId) {
+                    setStore(authStoreId, newName);
+                }
+                return { success: true };
+            }
+            return { success: false, error: 'Failed to update store name.' };
+        } catch (err: any) {
+            return { success: false, error: err.message || 'Failed to update store name.' };
+        }
+    };
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
@@ -215,7 +246,7 @@ export function CatalogManagerView() {
                     isOpen={isEditStoreOpen}
                     onClose={() => setIsEditStoreOpen(false)}
                     currentStoreName={storeName}
-                    onSave={updateStoreName}
+                    onSave={handleUpdateStoreName}
                 />
             )}
 
