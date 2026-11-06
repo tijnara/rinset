@@ -48,7 +48,7 @@ export const useAuthStore = create<AuthState>()(
             user: { id: 'cashier-default', name: 'Shift Cashier', role: 'cashier' },
             isAuthenticated: true,
             isHydrated: false,
-            ownerPin: '9999',
+            ownerPin: '0430',
             storeId: null,
             storeName: 'Rinset Laundry',
             branchCode: 'MAIN',
@@ -60,25 +60,23 @@ export const useAuthStore = create<AuthState>()(
             },
 
             initializeSession: (session: StoreSessionData) => {
-                const assignedRole: UserRole =
-                    session.role === 'cashier' || session.role === 'staff' ? session.role : 'owner';
-
+                // Always open session into Cashier mode upon login
                 set({
                     user: {
                         id: session.userId,
-                        name: assignedRole === 'owner' ? 'Store Owner' : 'Shift Cashier',
-                        role: assignedRole,
+                        name: 'Shift Cashier',
+                        role: 'cashier',
                     },
                     storeId: session.storeId,
                     storeName: session.storeName,
                     branchCode: session.branchCode ?? 'MAIN',
-                    ownerPin: session.ownerPin || get().ownerPin || '9999',
+                    ownerPin: session.ownerPin || get().ownerPin || '0430',
                     isAuthenticated: true,
                 });
             },
 
             loginWithPin: async (pin: string) => {
-                const activeOwnerPin = get().ownerPin || '9999';
+                const activeOwnerPin = get().ownerPin || '0430';
                 const activeStoreId = get().storeId;
 
                 try {
@@ -190,7 +188,7 @@ export const useAuthStore = create<AuthState>()(
             },
 
             changeOwnerPin: async (currentPin: string, newPin: string) => {
-                const activeOwnerPin = get().ownerPin || '9999';
+                const activeOwnerPin = get().ownerPin || '0430';
 
                 if (currentPin !== activeOwnerPin) {
                     return { success: false, error: 'Current PIN is incorrect.' };

@@ -59,7 +59,6 @@ export default function LoginPage() {
             let storeId = member?.store_id || profile?.store_id;
             let storeName = (member?.store as any)?.name ?? 'Rinset Laundry';
             let branchCode = (member?.store as any)?.branch_code ?? 'MAIN';
-            const role = member?.role || profile?.role || 'owner';
             const ownerPin = profile?.pin_code || member?.pin_code || '0430';
 
             // Auto-link fallback if user has no store_members entry yet
@@ -91,13 +90,14 @@ export default function LoginPage() {
                 return;
             }
 
+            // Initialize session directly in Cashier Mode
             initializeSession({
                 userId: authData.user.id,
                 email: authData.user.email ?? '',
                 storeId,
                 storeName,
                 branchCode,
-                role: role as any,
+                role: 'cashier',
                 ownerPin,
             });
 
