@@ -38,6 +38,9 @@ const COMMON_INSPECTION_TAGS = [
     'Delicate Fabric',
 ];
 
+const isUUID = (val?: string | null): boolean =>
+    Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+
 export function CheckoutModal({
                                   storeId: propStoreId,
                                   isOpen,
@@ -120,7 +123,7 @@ export function CheckoutModal({
         const supabase = createClient();
 
         try {
-            // 1. Discover or create customer scoped to store_id (uses full_name and mobile_number)
+            // 1. Discover or create customer scoped to store_id
             let customerId: string | null = null;
             const cleanMobile = customerMobile.trim();
             const cleanName = customerName.trim();
@@ -164,12 +167,9 @@ export function CheckoutModal({
             const calculatedDiscount =
                 (breakdown as any).discount ?? Math.max(0, breakdown.subtotal - breakdown.netPayable);
 
-            // Validate cashier_id UUID format
-            const isCashierUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-                user?.id || ''
-            );
+            const isCashierUuid = isUUID(user?.id);
 
-            // 3. Insert into orders table with store_id, basket_tag, rush fee, and inspection tags
+            // 3. Insert into orders table
             const { data: orderData, error: orderError } = await supabase
                 .from('orders')
                 .insert({
@@ -203,17 +203,20 @@ export function CheckoutModal({
                 throw new Error(orderError?.message || 'Failed to register order record.');
             }
 
-            // 4. Insert order line items
-            const orderItemsPayload = breakdown.items.map((item) => ({
-                order_id: orderData.id,
-                catalog_item_id: item.id && item.id.includes('-') ? item.id : null,
-                item_name: item.name,
-                pricing_type: item.pricingType,
-                unit_price: item.unitPrice,
-                quantity: item.quantity,
-                billable_quantity: item.quantity,
-                item_total: item.itemTotal,
-            }));
+            // 4. Insert order line items (Strict UUID check prevents invalid input syntax)
+            const orderItemsPayload = breakdown.items.map((item) => {
+                const hasValidCatalogUuid = isUUID(item.id);
+                return {
+                    order_id: orderData.id,
+                    catalog_item_id: hasValidCatalogUuid ? item.id : null,
+                    item_name: item.name,
+                    pricing_type: item.pricingType || (item as any).pricing_type || 'per_piece',
+                    unit_price: item.unitPrice ?? (item as any).unit_price ?? 0,
+                    quantity: item.quantity ?? 1,
+                    billable_quantity: item.quantity ?? 1,
+                    item_total: item.itemTotal ?? ((item.unitPrice ?? 0) * (item.quantity ?? 1)),
+                };
+            });
 
             const { error: itemsError } = await supabase
                 .from('order_items')
