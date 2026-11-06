@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Rinset
 
-## Getting Started
+Rinset is a point-of-sale and laundry operations app built for laundry shops. The current app entry point is a responsive POS screen where staff can browse the service catalog, build customer tickets, and register orders.
 
-First, run the development server:
+## What it does
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- Loads active catalog items for a store from Supabase, with category filters and search.
+- Supports per-piece and per-kilo pricing, a cart/ticket, and checkout.
+- Records customer details, payment method and status, pickup or delivery, rush turnaround, garment inspection notes, and optional storage locations.
+- Shows order receipts and supports quick cash-out recording.
+- Includes feature modules for authentication, audit, catalog, customers, machines, orders, and POS.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The interface is optimized for desktop and tablet use, with a mobile-friendly cart and keyboard shortcuts: `/` focuses search, `F8` opens checkout, `F9` opens quick cash-out, and `Escape` clears search or closes the mobile cart.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Requirements
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Node.js and npm
+- A Supabase project configured for the app's database and authentication
 
-## Learn More
+## Setup
 
-To learn more about Next.js, take a look at the following resources:
+1. Install dependencies:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+   ```bash
+   npm install
+   ```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+2. Create `.env.local` in the project root and add your Supabase project URL and publishable key:
 
-## Deploy on Vercel
+   ```dotenv
+   NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
+   ```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+3. Start the development server:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+   ```bash
+   npm run dev
+   ```
+
+4. Open [http://localhost:3000](http://localhost:3000).
+
+The app expects the Supabase database, tables, and access policies used by Rinset to be set up in your project.
+
+## Available scripts
+
+- `npm run dev` — start the Next.js development server.
+- `npm run build` — create a production build.
+- `npm run start` — serve the production build.
+- `npm run lint` — run ESLint.
+
+## Tech stack
+
+Next.js 16, React 19, TypeScript, Tailwind CSS 4, and Supabase. Zustand is used for client-side cart and app state.
