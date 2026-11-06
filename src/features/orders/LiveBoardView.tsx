@@ -78,13 +78,17 @@ export function LiveBoardView() {
 
         let query = supabase
             .from('orders')
-            .update({ storage_location: location, updated_at: new Date().toISOString() })
+            .update({ storage_location: location })
             .eq('id', storageTarget.order_id);
 
         if (storeId) {
             query = query.eq('store_id', storeId);
         }
-        await query;
+
+        const { error: storageErr } = await query;
+        if (storageErr) {
+            console.warn('[Storage Update Notice]', storageErr.message);
+        }
 
         await updateBasketStatus(storageTarget.id, storageTarget.order_id, 'ready_for_pickup', null);
 
@@ -133,23 +137,8 @@ export function LiveBoardView() {
             // Ignored
         }
 
-        // 2. Also sync to machines table if present
-        try {
-            const supabase = createClient();
-            await supabase
-                .from('machines')
-                .update({
-                    status: 'running',
-                    current_basket_tag: cleanBasketTag,
-                    started_at: now.toISOString(),
-                    ends_at: endsAt.toISOString(),
-                })
-                .eq('name', machineId.toUpperCase());
-        } catch {
-            // Ignored
-        }
-
         setAssignTarget(null);
+        window.dispatchEvent(new CustomEvent('rinset:timers-updated'));
         window.dispatchEvent(new CustomEvent('rinset:order-updated'));
         refreshOrders();
     };

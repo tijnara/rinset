@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useCartStore } from '@/features/pos/store/useCartStore';
 import { useAuthStore } from '@/features/auth/store/useAuthStore';
 import { formatPHP } from '@/lib/formatters';
+import { TouchNumpad } from '@/components/ui/TouchNumpad';
 import {
     X,
     CreditCard,
@@ -13,13 +14,15 @@ import {
     PackageCheck,
     CheckCircle2,
     AlertCircle,
+    AlertTriangle,
     Loader2,
     Receipt,
     User,
     Phone,
     Zap,
     ShieldAlert,
-    Layers,
+    ChevronDown,
+    ChevronUp,
     Sparkles,
 } from 'lucide-react';
 
@@ -58,16 +61,17 @@ export function CheckoutModal({
         getBreakdown,
         clearCart,
         setCustomer,
-        addItem,
     } = useCartStore();
 
     const breakdown = getBreakdown();
 
     const [paymentMethod, setPaymentMethod] = useState<'cash' | 'gcash'>('cash');
     const [paymentStatus, setPaymentStatus] = useState<'paid' | 'unpaid'>('paid');
+    const [isPartialDeposit, setIsPartialDeposit] = useState<boolean>(false);
     const [deliveryMode, setDeliveryMode] = useState<'pickup' | 'delivery'>('pickup');
     const [deliveryAddress, setDeliveryAddress] = useState('');
     const [cashTendered, setCashTendered] = useState<string>('');
+    const [activeNumpadField, setActiveNumpadField] = useState<'cash' | 'mobile' | null>(null);
     const [storageLocation, setStorageLocation] = useState('');
     const [isRush, setIsRush] = useState(false);
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -76,25 +80,37 @@ export function CheckoutModal({
 
     if (!isOpen) return null;
 
-    // Detect 8kg washer drum capacity overload
-    const totalKilos = breakdown.items
-        .filter((i) => i.pricingType === 'per_kilo')
-        .reduce((sum, i) => sum + (i.quantity || 0), 0);
-    const isOverweight = totalKilos > 8;
-
     const RUSH_SURCHARGE = 80;
     const payable = breakdown.netPayable + (isRush ? RUSH_SURCHARGE : 0);
     const tenderedNum = parseFloat(cashTendered) || 0;
     const changeDue = Math.max(0, tenderedNum - payable);
 
-    const handleQuickCash = (amount: number) => {
-        setCashTendered(amount.toString());
-    };
+    // Short payment detection
+    const isShortPayment =
+        paymentMethod === 'cash' &&
+        paymentStatus === 'paid' &&
+        tenderedNum > 0 &&
+        tenderedNum < payable;
+
+    const shortageAmount = Math.max(0, payable - tenderedNum);
+
+    const isZeroCashTendered =
+        paymentMethod === 'cash' &&
+        paymentStatus === 'paid' &&
+        tenderedNum === 0;
 
     const toggleTag = (tag: string) => {
         setSelectedTags((prev) =>
             prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
         );
+    };
+
+    const handleCashTenderedChange = (val: string) => {
+        setCashTendered(val);
+        const num = parseFloat(val) || 0;
+        if (num >= payable) {
+            setIsPartialDeposit(false);
+        }
     };
 
     const handlePlaceOrder = async (e: React.FormEvent) => {
@@ -108,13 +124,13 @@ export function CheckoutModal({
         }
 
         if (!customerName.trim() || !customerMobile.trim()) {
-            setErrorMessage('Please provide the customer name and contact mobile number.');
+            setErrorMessage('Please provide customer name and mobile number.');
             return;
         }
 
-        if (paymentMethod === 'cash' && paymentStatus === 'paid' && tenderedNum < payable) {
+        if (paymentMethod === 'cash' && paymentStatus === 'paid' && !isPartialDeposit && tenderedNum < payable) {
             setErrorMessage(
-                `Insufficient cash tendered. Total is ${formatPHP(payable)}, received ${formatPHP(tenderedNum)}.`
+                `Kulang ang bayad: Total is ${formatPHP(payable)}, received ${formatPHP(tenderedNum)}. Kulang ng ${formatPHP(shortageAmount)}.`
             );
             return;
         }
@@ -123,21 +139,16 @@ export function CheckoutModal({
         const supabase = createClient();
 
         try {
-            // 1. Discover or create customer scoped to store_id
             let customerId: string | null = null;
             const cleanMobile = customerMobile.trim();
             const cleanName = customerName.trim();
 
-            const { data: existingCustomer, error: searchError } = await supabase
+            const { data: existingCustomer } = await supabase
                 .from('customers')
                 .select('id')
                 .eq('store_id', effectiveStoreId)
                 .eq('mobile_number', cleanMobile)
                 .maybeSingle();
-
-            if (searchError) {
-                console.error('[Customer Search Error]', searchError);
-            }
 
             if (existingCustomer) {
                 customerId = existingCustomer.id;
@@ -153,23 +164,27 @@ export function CheckoutModal({
                     .select('id')
                     .single();
 
-                if (custError || !newCustomer) {
-                    throw new Error(custError?.message || 'Failed to register customer record.');
-                }
-
+                if (custError || !newCustomer) throw new Error(custError?.message || 'Failed to register customer.');
                 customerId = newCustomer.id;
             }
 
-            // 2. Determine unique Order Number / Ticket Tag
             const cleanBasketTag = basketTag?.trim() || `B-${Math.floor(100 + Math.random() * 900)}`;
             const orderNumber = cleanBasketTag.toUpperCase();
-
             const calculatedDiscount =
                 (breakdown as any).discount ?? Math.max(0, breakdown.subtotal - breakdown.netPayable);
 
             const isCashierUuid = isUUID(user?.id);
 
-            // 3. Insert into orders table
+            const orderNotes: string[] = [];
+            if (notes) orderNotes.push(notes);
+            if (isPartialDeposit) {
+                orderNotes.push(
+                    `PARTIAL DEPOSIT (ABONO): Received ${formatPHP(tenderedNum)} cash. BALANCE DUE ON CLAIM: ${formatPHP(shortageAmount)}.`
+                );
+            }
+
+            const effectivePaymentStatus = isPartialDeposit ? 'unpaid' : paymentStatus;
+
             const { data: orderData, error: orderError } = await supabase
                 .from('orders')
                 .insert({
@@ -183,7 +198,7 @@ export function CheckoutModal({
                     delivery_mode: deliveryMode,
                     delivery_address: deliveryMode === 'delivery' ? deliveryAddress.trim() : null,
                     storage_location: storageLocation.trim() || null,
-                    special_notes: notes ? [notes] : [],
+                    special_notes: orderNotes,
                     special_handling_tags: selectedTags,
                     subtotal: breakdown.subtotal,
                     delivery_fee: 0,
@@ -191,42 +206,29 @@ export function CheckoutModal({
                     is_rush: isRush,
                     rush_fee: isRush ? RUSH_SURCHARGE : 0,
                     net_payable: payable,
-                    payment_status: paymentStatus,
+                    payment_status: effectivePaymentStatus,
                     payment_method: paymentMethod,
                     cashier_id: isCashierUuid ? user?.id : null,
                 })
                 .select('id, order_number')
                 .single();
 
-            if (orderError || !orderData) {
-                console.error('[Order Insert Error Details]', orderError);
-                throw new Error(orderError?.message || 'Failed to register order record.');
-            }
+            if (orderError || !orderData) throw new Error(orderError?.message || 'Failed to create order.');
 
-            // 4. Insert order line items (Strict UUID check prevents invalid input syntax)
-            const orderItemsPayload = breakdown.items.map((item) => {
-                const hasValidCatalogUuid = isUUID(item.id);
-                return {
-                    order_id: orderData.id,
-                    catalog_item_id: hasValidCatalogUuid ? item.id : null,
-                    item_name: item.name,
-                    pricing_type: item.pricingType || (item as any).pricing_type || 'per_piece',
-                    unit_price: item.unitPrice ?? (item as any).unit_price ?? 0,
-                    quantity: item.quantity ?? 1,
-                    billable_quantity: item.quantity ?? 1,
-                    item_total: item.itemTotal ?? ((item.unitPrice ?? 0) * (item.quantity ?? 1)),
-                };
-            });
+            const orderItemsPayload = breakdown.items.map((item) => ({
+                order_id: orderData.id,
+                catalog_item_id: isUUID(item.id) ? item.id : null,
+                item_name: item.name,
+                pricing_type: item.pricingType || (item as any).pricing_type || 'per_piece',
+                unit_price: item.unitPrice ?? (item as any).unit_price ?? 0,
+                quantity: item.quantity ?? 1,
+                billable_quantity: item.quantity ?? 1,
+                item_total: item.itemTotal ?? ((item.unitPrice ?? 0) * (item.quantity ?? 1)),
+            }));
 
-            const { error: itemsError } = await supabase
-                .from('order_items')
-                .insert(orderItemsPayload);
+            const { error: itemsError } = await supabase.from('order_items').insert(orderItemsPayload);
+            if (itemsError) throw new Error(`Failed to save line items: ${itemsError.message}`);
 
-            if (itemsError) {
-                throw new Error(`Failed to save line items: ${itemsError.message}`);
-            }
-
-            // 5. Insert physical basket tracker with store_id
             try {
                 await supabase.from('order_baskets').insert({
                     order_id: orderData.id,
@@ -234,294 +236,184 @@ export function CheckoutModal({
                     basket_tag: cleanBasketTag,
                     status: 'received',
                 });
-            } catch (basketErr) {
-                console.warn('[Order Basket Track Warning]', basketErr);
-            }
+            } catch {}
 
-            // 6. Complete & Reset
             clearCart();
             onSuccess(orderData.order_number);
             onClose();
         } catch (err: any) {
-            console.error('[Transaction Error]', err);
             setErrorMessage(err.message || 'Error processing transaction.');
         } finally {
             setLoading(false);
         }
     };
 
+    const isSubmitBlocked =
+        loading ||
+        (paymentMethod === 'cash' && paymentStatus === 'paid' && !isPartialDeposit && tenderedNum < payable);
+
     return (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 select-none animate-in fade-in duration-150">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
-                {/* Header */}
-                <div className="px-5 py-3.5 border-b border-slate-800 flex justify-between items-center bg-slate-950/70">
-                    <div className="flex items-center space-x-2">
-                        <Receipt className="w-5 h-5 text-sky-400" />
-                        <h2 className="font-bold text-base text-white">Finalize Transaction</h2>
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 select-none animate-in fade-in duration-150">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl flex flex-col h-full max-h-[calc(100dvh-1.5rem)] sm:max-h-[680px] overflow-hidden">
+
+                {/* ======================================================== */}
+                {/* PINNED TOP HEADER: Visible on Desktop & Mobile Viewports  */}
+                {/* ======================================================== */}
+                <div className="flex-shrink-0 bg-slate-950 border-b border-slate-800">
+                    {/* Top Dialog Bar */}
+                    <div className="px-4 py-2.5 sm:px-5 sm:py-3 flex justify-between items-center border-b border-slate-800/80">
+                        <div className="flex items-center space-x-2">
+                            <Receipt className="w-4 h-4 sm:w-5 sm:h-5 text-sky-400" />
+                            <div>
+                                <h2 className="font-bold text-xs sm:text-sm text-white">Finalize Transaction</h2>
+                                <span className="text-[10px] font-mono font-bold text-sky-400 uppercase">
+                  Ticket #{basketTag}
+                </span>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition active:scale-95"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
                     </div>
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition"
-                    >
-                        <X className="w-4 h-4" />
-                    </button>
+
+                    {/* Total Due & Customer Name Bar */}
+                    <div className="p-3 sm:p-3.5 space-y-2.5 bg-slate-950/95">
+                        {/* Total Due Row */}
+                        <div className="flex justify-between items-center px-0.5">
+                            <div>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                                    Total Payable ({breakdown.items.length} items)
+                                </p>
+                                {isRush && (
+                                    <span className="text-[10px] font-bold text-amber-400 flex items-center gap-0.5 mt-0.5">
+                    <Zap className="w-2.5 h-2.5" /> Priority Express (+₱80)
+                  </span>
+                                )}
+                            </div>
+                            <span className="font-mono text-xl sm:text-2xl font-black text-emerald-400">
+                {formatPHP(payable)}
+              </span>
+                        </div>
+
+                        {/* Customer Name Input */}
+                        <div className="space-y-1">
+                            <div className="flex justify-between items-center px-0.5">
+                                <label className="text-[10px] sm:text-[11px] font-bold text-slate-300 uppercase tracking-wide flex items-center gap-1">
+                                    <User className="w-3 h-3 text-sky-400" /> Customer Name:
+                                </label>
+                                <button
+                                    type="button"
+                                    onClick={() => setCustomer('Walk-in Customer', customerMobile || '09000000000')}
+                                    className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-sky-300 border border-slate-700 transition active:scale-95"
+                                >
+                                    + Walk-in
+                                </button>
+                            </div>
+
+                            <input
+                                type="text"
+                                required
+                                placeholder="Type Customer Name (e.g. Maria Santos)"
+                                value={customerName}
+                                onChange={(e) => setCustomer(e.target.value, customerMobile)}
+                                className="w-full min-h-[42px] bg-slate-900 border border-slate-700 focus:border-sky-500 rounded-xl px-3 py-1.5 text-xs sm:text-sm font-semibold text-white placeholder-slate-500 focus:outline-none transition shadow-inner"
+                            />
+                        </div>
+                    </div>
                 </div>
 
-                {/* Form Body */}
-                <form onSubmit={handlePlaceOrder} className="flex-1 overflow-y-auto p-5 space-y-4">
+                {/* ======================================================== */}
+                {/* SCROLLABLE BODY: Secondary Fields & Payment Inputs        */}
+                {/* ======================================================== */}
+                <form onSubmit={handlePlaceOrder} className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3.5">
                     {errorMessage && (
-                        <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center space-x-2">
+                        <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center space-x-2">
                             <AlertCircle className="w-4 h-4 flex-shrink-0" />
                             <span>{errorMessage}</span>
                         </div>
                     )}
 
-                    {/* Overweight Capacity Notice */}
-                    {isOverweight && (
-                        <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-start space-x-2.5">
-                            <Layers className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-                            <div>
-                                <p className="font-bold">Machine Capacity Warning ({totalKilos.toFixed(1)} kg)</p>
-                                <p className="text-[11px] text-amber-300/80 mt-0.5">
-                                    Exceeds standard 8kg washer drum capacity. Recommend splitting laundry into 2 machines ({basketTag}-A & {basketTag}-B).
-                                </p>
+                    {/* Customer Mobile # */}
+                    <div className="space-y-1">
+                        <label className="text-[10px] sm:text-[11px] text-slate-400 font-semibold uppercase flex justify-between px-0.5">
+                            <span>Customer Mobile #</span>
+                            <span className="text-[10px] text-sky-400 font-normal">Tap to edit</span>
+                        </label>
+                        <div
+                            onClick={() => setActiveNumpadField(activeNumpadField === 'mobile' ? null : 'mobile')}
+                            className={`w-full min-h-[44px] bg-slate-950 border rounded-xl pl-9 pr-3 py-2 flex items-center justify-between cursor-pointer transition relative ${
+                                activeNumpadField === 'mobile' ? 'border-sky-500 bg-sky-500/5' : 'border-slate-800'
+                            }`}
+                        >
+                            <Phone className="w-4 h-4 absolute left-3 text-slate-500" />
+                            <span className="font-mono text-xs sm:text-sm text-white">
+                {customerMobile || <span className="text-slate-500">0917...</span>}
+              </span>
+                            {activeNumpadField === 'mobile' ? (
+                                <ChevronUp className="w-4 h-4 text-sky-400" />
+                            ) : (
+                                <ChevronDown className="w-4 h-4 text-slate-500" />
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Embedded Touch Numpad for Mobile Input */}
+                    {activeNumpadField === 'mobile' && (
+                        <div className="p-3 bg-slate-950 border border-slate-800 rounded-2xl animate-in fade-in duration-150">
+                            <div className="flex justify-between items-center mb-2 px-1">
+                                <span className="text-xs font-bold text-slate-300">Customer Mobile Pad</span>
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveNumpadField(null)}
+                                    className="text-xs text-sky-400 font-bold"
+                                >
+                                    Done
+                                </button>
                             </div>
+                            <TouchNumpad
+                                value={customerMobile}
+                                onChange={(val) => setCustomer(customerName, val)}
+                                onEnter={() => setActiveNumpadField(null)}
+                                allowDecimal={false}
+                                maxLength={11}
+                                enterLabel="Confirm Mobile"
+                            />
                         </div>
                     )}
 
-                    {/* Ticket Total Summary */}
-                    <div className="bg-slate-950 border border-slate-800/90 rounded-2xl p-4 flex justify-between items-center">
-                        <div>
-                            <p className="text-[11px] text-slate-400 uppercase font-bold tracking-wider">
-                                Total Due ({breakdown.items.length} items)
-                            </p>
-                            <div className="flex items-center gap-2 mt-0.5">
-                                <span className="text-xs font-mono text-sky-400 font-bold uppercase">{basketTag}</span>
-                                {isRush && (
-                                    <span className="text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
-                    <Zap className="w-2.5 h-2.5" /> Rush (+₱80)
-                  </span>
-                                )}
-                            </div>
-                        </div>
-                        <div className="text-right">
-              <span className="font-mono text-2xl font-black text-emerald-400">
-                {formatPHP(payable)}
-              </span>
-                        </div>
-                    </div>
-
-                    {/* Quick Consumables Bar */}
-                    <div className="space-y-1.5">
-            <span className="text-[11px] text-slate-400 font-semibold uppercase flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-sky-400" /> Quick Add Consumables
-            </span>
-                        <div className="flex gap-1.5 overflow-x-auto pb-1">
-                            <button
-                                type="button"
-                                onClick={() =>
-                                    addItem({
-                                        id: 'cons-ariel',
-                                        name: 'Ariel Liquid Pod',
-                                        category: 'CONSUMABLES',
-                                        pricing_type: 'per_piece',
-                                        pricingType: 'per_piece',
-                                        unit_price: 18,
-                                        unitPrice: 18,
-                                        minimum_quantity: 1,
-                                        minimumQuantity: 1,
-                                        is_active: true,
-                                        isActive: true,
-                                    } as any)
-                                }
-                                className="px-2.5 py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl text-[11px] font-semibold whitespace-nowrap transition"
-                            >
-                                + Ariel Pod (₱18)
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() =>
-                                    addItem({
-                                        id: 'cons-downy',
-                                        name: 'Downy FabCon Sachet',
-                                        category: 'CONSUMABLES',
-                                        pricing_type: 'per_piece',
-                                        pricingType: 'per_piece',
-                                        unit_price: 14,
-                                        unitPrice: 14,
-                                        minimum_quantity: 1,
-                                        minimumQuantity: 1,
-                                        is_active: true,
-                                        isActive: true,
-                                    } as any)
-                                }
-                                className="px-2.5 py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl text-[11px] font-semibold whitespace-nowrap transition"
-                            >
-                                + Downy FabCon (₱14)
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() =>
-                                    addItem({
-                                        id: 'cons-bleach',
-                                        name: 'Color-Safe Bleach Shot',
-                                        category: 'CONSUMABLES',
-                                        pricing_type: 'per_piece',
-                                        pricingType: 'per_piece',
-                                        unit_price: 12,
-                                        unitPrice: 12,
-                                        minimum_quantity: 1,
-                                        minimumQuantity: 1,
-                                        is_active: true,
-                                        isActive: true,
-                                    } as any)
-                                }
-                                className="px-2.5 py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl text-[11px] font-semibold whitespace-nowrap transition"
-                            >
-                                + Color Bleach (₱12)
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Customer Confirmation */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        <div className="space-y-1">
-                            <label className="text-[11px] text-slate-400 font-semibold uppercase">Customer</label>
-                            <div className="relative">
-                                <User className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-500" />
-                                <input
-                                    type="text"
-                                    required
-                                    placeholder="Customer Name"
-                                    value={customerName}
-                                    onChange={(e) => setCustomer(e.target.value, customerMobile)}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:border-sky-500 focus:outline-none"
-                                />
-                            </div>
-                        </div>
-                        <div className="space-y-1">
-                            <label className="text-[11px] text-slate-400 font-semibold uppercase">Mobile #</label>
-                            <div className="relative">
-                                <Phone className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-500" />
-                                <input
-                                    type="text"
-                                    required
-                                    placeholder="0917..."
-                                    value={customerMobile}
-                                    onChange={(e) => setCustomer(customerName, e.target.value)}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:border-sky-500 focus:outline-none font-mono"
-                                />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Pre-Wash Garment Inspection Checklist */}
-                    <div className="space-y-1.5">
-                        <label className="text-[11px] text-slate-400 font-semibold uppercase flex items-center gap-1">
-                            <ShieldAlert className="w-3 h-3 text-amber-400" /> Pre-Wash Garment Inspection
-                        </label>
-                        <div className="flex flex-wrap gap-1.5">
-                            {COMMON_INSPECTION_TAGS.map((tag) => {
-                                const isSelected = selectedTags.includes(tag);
-                                return (
-                                    <button
-                                        key={tag}
-                                        type="button"
-                                        onClick={() => toggleTag(tag)}
-                                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition ${
-                                            isSelected
-                                                ? 'bg-amber-500/20 border-amber-400 text-amber-300'
-                                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-                                        }`}
-                                    >
-                                        {tag}
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    </div>
-
-                    {/* Rush / Express Surcharge Toggle */}
-                    <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-950 border border-slate-800">
-                        <div className="flex items-center space-x-2">
-                            <Zap className={`w-4 h-4 ${isRush ? 'text-amber-400' : 'text-slate-500'}`} />
-                            <div>
-                                <p className="text-xs font-bold text-white">Express / Rush Turnaround (+₱80)</p>
-                                <p className="text-[10px] text-slate-400">Guaranteed 4-to-6 hour priority turnaround</p>
-                            </div>
-                        </div>
-                        <input
-                            type="checkbox"
-                            checked={isRush}
-                            onChange={(e) => setIsRush(e.target.checked)}
-                            className="w-4 h-4 accent-sky-500 rounded cursor-pointer"
-                        />
-                    </div>
-
-                    {/* Fulfillment Mode */}
-                    <div className="space-y-1.5">
-                        <label className="text-[11px] text-slate-400 font-semibold uppercase">Fulfillment Mode</label>
-                        <div className="grid grid-cols-2 gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setDeliveryMode('pickup')}
-                                className={`py-2 px-3 rounded-xl border flex items-center justify-center space-x-2 text-xs font-bold transition ${
-                                    deliveryMode === 'pickup'
-                                        ? 'bg-sky-500/20 border-sky-400 text-sky-300'
-                                        : 'bg-slate-950 border-slate-800 text-slate-400'
-                                }`}
-                            >
-                                <PackageCheck className="w-4 h-4" />
-                                <span>Store Pickup</span>
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setDeliveryMode('delivery')}
-                                className={`py-2 px-3 rounded-xl border flex items-center justify-center space-x-2 text-xs font-bold transition ${
-                                    deliveryMode === 'delivery'
-                                        ? 'bg-sky-500/20 border-sky-400 text-sky-300'
-                                        : 'bg-slate-950 border-slate-800 text-slate-400'
-                                }`}
-                            >
-                                <Truck className="w-4 h-4" />
-                                <span>Doorstep Delivery</span>
-                            </button>
-                        </div>
-                        {deliveryMode === 'delivery' && (
-                            <input
-                                type="text"
-                                placeholder="Dropoff Delivery Address"
-                                value={deliveryAddress}
-                                onChange={(e) => setDeliveryAddress(e.target.value)}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-sky-500 focus:outline-none mt-1"
-                            />
-                        )}
-                    </div>
-
-                    {/* Payment Method & Status */}
-                    <div className="space-y-2 pt-2 border-t border-slate-800">
+                    {/* Payment Terms & Method */}
+                    <div className="space-y-2 pt-1 border-t border-slate-800">
                         <div className="flex justify-between items-center">
-                            <label className="text-[11px] text-slate-400 font-semibold uppercase">Payment Method</label>
+                            <label className="text-[10px] sm:text-[11px] text-slate-400 font-semibold uppercase">Payment Terms</label>
                             <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
                                 <button
                                     type="button"
-                                    onClick={() => setPaymentStatus('paid')}
-                                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                                        paymentStatus === 'paid'
+                                    onClick={() => {
+                                        setPaymentStatus('paid');
+                                        setIsPartialDeposit(false);
+                                    }}
+                                    className={`min-h-[36px] px-2.5 rounded-lg text-xs font-bold transition active:scale-95 ${
+                                        paymentStatus === 'paid' && !isPartialDeposit
                                             ? 'bg-emerald-500 text-slate-950'
-                                            : 'text-slate-400 hover:text-white'
+                                            : 'text-slate-400'
                                     }`}
                                 >
                                     Paid Now
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setPaymentStatus('unpaid')}
-                                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                                        paymentStatus === 'unpaid'
+                                    onClick={() => {
+                                        setPaymentStatus('unpaid');
+                                        setIsPartialDeposit(false);
+                                    }}
+                                    className={`min-h-[36px] px-2.5 rounded-lg text-xs font-bold transition active:scale-95 ${
+                                        paymentStatus === 'unpaid' && !isPartialDeposit
                                             ? 'bg-amber-500 text-slate-950'
-                                            : 'text-slate-400 hover:text-white'
+                                            : 'text-slate-400'
                                     }`}
                                 >
                                     Pay on Claim
@@ -533,7 +425,7 @@ export function CheckoutModal({
                             <button
                                 type="button"
                                 onClick={() => setPaymentMethod('cash')}
-                                className={`py-2 px-3 rounded-xl border flex items-center justify-center space-x-2 text-xs font-bold transition ${
+                                className={`min-h-[44px] py-2 px-3 rounded-xl border flex items-center justify-center space-x-2 text-xs font-bold transition active:scale-95 ${
                                     paymentMethod === 'cash'
                                         ? 'bg-sky-500/20 border-sky-400 text-sky-300'
                                         : 'bg-slate-950 border-slate-800 text-slate-400'
@@ -545,7 +437,7 @@ export function CheckoutModal({
                             <button
                                 type="button"
                                 onClick={() => setPaymentMethod('gcash')}
-                                className={`py-2 px-3 rounded-xl border flex items-center justify-center space-x-2 text-xs font-bold transition ${
+                                className={`min-h-[44px] py-2 px-3 rounded-xl border flex items-center justify-center space-x-2 text-xs font-bold transition active:scale-95 ${
                                     paymentMethod === 'gcash'
                                         ? 'bg-sky-500/20 border-sky-400 text-sky-300'
                                         : 'bg-slate-950 border-slate-800 text-slate-400'
@@ -557,70 +449,247 @@ export function CheckoutModal({
                         </div>
                     </div>
 
-                    {/* Cash Calculations */}
+                    {/* Cash Calculations & Live Shortfall Handling */}
                     {paymentMethod === 'cash' && paymentStatus === 'paid' && (
-                        <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
+                        <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-3 sm:p-3.5 space-y-2.5">
                             <div className="flex justify-between items-center">
-                                <span className="text-xs text-slate-300 font-medium">Cash Received</span>
-                                <div className="relative w-36">
-                                    <span className="absolute left-3 top-2 text-xs font-mono text-slate-500">₱</span>
-                                    <input
-                                        type="number"
-                                        step="any"
-                                        placeholder="0.00"
-                                        value={cashTendered}
-                                        onChange={(e) => setCashTendered(e.target.value)}
-                                        className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-7 pr-3 py-1.5 text-right font-mono text-sm font-bold text-white focus:border-sky-500 focus:outline-none"
-                                    />
+                                <span className="text-xs text-slate-300 font-bold uppercase">Cash Received</span>
+                                <div
+                                    onClick={() => setActiveNumpadField(activeNumpadField === 'cash' ? null : 'cash')}
+                                    className={`cursor-pointer px-3.5 py-1.5 border rounded-xl font-mono text-sm sm:text-base font-black flex items-center gap-1.5 transition ${
+                                        isShortPayment
+                                            ? 'bg-rose-500/10 border-rose-500 text-rose-400'
+                                            : 'bg-slate-900 border-slate-700 hover:border-sky-500 text-emerald-400'
+                                    }`}
+                                >
+                                    <span>₱</span>
+                                    <span>{cashTendered || '0.00'}</span>
                                 </div>
                             </div>
 
-                            <div className="flex space-x-1.5 justify-end">
+                            {/* Quick Cash Presets */}
+                            <div className="grid grid-cols-4 gap-1.5">
                                 {[payable, Math.ceil(payable / 100) * 100, 500, 1000].map((amt, idx) => (
                                     <button
                                         key={idx}
                                         type="button"
-                                        onClick={() => handleQuickCash(amt)}
-                                        className="px-2 py-1 bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-lg font-mono text-[11px] text-slate-300"
+                                        onClick={() => handleCashTenderedChange(amt.toString())}
+                                        className="min-h-[42px] rounded-xl bg-slate-900 border border-slate-800 hover:border-sky-500/50 active:scale-95 font-mono text-xs font-bold text-slate-200 transition"
                                     >
                                         ₱{amt}
                                     </button>
                                 ))}
                             </div>
 
-                            <div className="flex justify-between items-baseline pt-2 border-t border-slate-800/80">
-                                <span className="text-xs text-slate-400 font-semibold uppercase">Change Due</span>
-                                <span className="font-mono text-base font-black text-sky-400">
-                  {formatPHP(changeDue)}
-                </span>
-                            </div>
+                            {/* Touch Numpad Drawer for Cash Tendered */}
+                            {activeNumpadField === 'cash' && (
+                                <div className="pt-2 border-t border-slate-800/80 animate-in fade-in duration-150">
+                                    <TouchNumpad
+                                        value={cashTendered}
+                                        onChange={handleCashTenderedChange}
+                                        onEnter={() => setActiveNumpadField(null)}
+                                        allowDecimal={true}
+                                        maxLength={7}
+                                        enterLabel="Done Entering Cash"
+                                    />
+                                </div>
+                            )}
+
+                            {/* Short Payment Interactive Banner */}
+                            {isShortPayment && !isPartialDeposit && (
+                                <div className="p-3 rounded-2xl bg-rose-500/15 border border-rose-500/40 text-rose-300 space-y-2 animate-in fade-in">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center space-x-1.5">
+                                            <AlertTriangle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
+                                            <span className="font-bold text-[11px] uppercase tracking-wide text-rose-400">
+                        Kulang ang Bayad / Short
+                      </span>
+                                        </div>
+                                        <span className="font-mono text-sm font-black text-rose-400">
+                      - {formatPHP(shortageAmount)}
+                    </span>
+                                    </div>
+
+                                    <p className="text-[10px] text-slate-300 leading-tight">
+                                        Received {formatPHP(tenderedNum)} out of {formatPHP(payable)}.
+                                    </p>
+
+                                    <div className="grid grid-cols-2 gap-2 pt-0.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => handleCashTenderedChange(payable.toString())}
+                                            className="min-h-[40px] px-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold text-[11px] transition active:scale-95"
+                                        >
+                                            <span>Set Exact ({formatPHP(payable)})</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsPartialDeposit(true)}
+                                            className="min-h-[40px] px-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] transition active:scale-95 shadow-md"
+                                        >
+                                            <span>Bayad Partial (Abono)</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Confirmed Partial Deposit Mode */}
+                            {isPartialDeposit && (
+                                <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-300 space-y-1.5 animate-in fade-in">
+                                    <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs uppercase tracking-wide flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      Downpayment (Abono) Mode
+                    </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsPartialDeposit(false)}
+                                            className="text-[10px] text-slate-400 hover:text-white underline font-mono"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                    <div className="text-xs space-y-0.5 font-mono">
+                                        <div className="flex justify-between text-slate-300">
+                                            <span>Deposit Paid Now:</span>
+                                            <strong className="text-white">{formatPHP(tenderedNum)}</strong>
+                                        </div>
+                                        <div className="flex justify-between text-amber-400 font-bold">
+                                            <span>Balance Due on Claim:</span>
+                                            <span>{formatPHP(shortageAmount)}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Normal Change Due Display */}
+                            {!isShortPayment && !isPartialDeposit && (
+                                <div className="flex justify-between items-baseline pt-1.5 border-t border-slate-800/80">
+                                    <span className="text-[11px] text-slate-400 font-semibold uppercase">Change Due</span>
+                                    <span className="font-mono text-lg font-black text-sky-400">
+                    {formatPHP(changeDue)}
+                  </span>
+                                </div>
+                            )}
                         </div>
                     )}
 
-                    {/* Storage Slot */}
-                    <div className="space-y-1">
-                        <label className="text-[11px] text-slate-400 font-semibold uppercase">
-                            Storage Slot / Shelf Rack (Optional)
+                    {/* Pre-Wash Garment Inspection Checklist */}
+                    <div className="space-y-1.5">
+                        <label className="text-[10px] sm:text-[11px] text-slate-400 font-semibold uppercase flex items-center gap-1">
+                            <ShieldAlert className="w-3 h-3 text-amber-400" /> Pre-Wash Garment Inspection
                         </label>
+                        <div className="flex flex-wrap gap-1.5">
+                            {COMMON_INSPECTION_TAGS.map((tag) => {
+                                const isSelected = selectedTags.includes(tag);
+                                return (
+                                    <button
+                                        key={tag}
+                                        type="button"
+                                        onClick={() => toggleTag(tag)}
+                                        className={`min-h-[38px] px-2.5 py-1 rounded-xl text-[11px] font-semibold border transition active:scale-95 ${
+                                            isSelected
+                                                ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                                                : 'bg-slate-950 border-slate-800 text-slate-400'
+                                        }`}
+                                    >
+                                        {tag}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Rush / Express Surcharge Toggle */}
+                    <div
+                        onClick={() => setIsRush(!isRush)}
+                        className="min-h-[46px] flex items-center justify-between p-2.5 rounded-2xl bg-slate-950 border border-slate-800 cursor-pointer active:scale-98 transition"
+                    >
+                        <div className="flex items-center space-x-2">
+                            <Zap className={`w-3.5 h-3.5 ${isRush ? 'text-amber-400' : 'text-slate-500'}`} />
+                            <div>
+                                <p className="text-xs font-bold text-white">Express / Rush Turnaround (+₱80)</p>
+                                <p className="text-[10px] text-slate-400">Guaranteed 4-to-6 hour priority turnaround</p>
+                            </div>
+                        </div>
                         <input
-                            type="text"
-                            placeholder="e.g. Shelf B-2, Hanger Rack 4"
-                            value={storageLocation}
-                            onChange={(e) => setStorageLocation(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-sky-500 focus:outline-none font-mono"
+                            type="checkbox"
+                            checked={isRush}
+                            onChange={() => {}}
+                            className="w-4 h-4 accent-sky-500 rounded cursor-pointer"
                         />
                     </div>
 
-                    {/* Submit Action */}
+                    {/* Fulfillment Mode */}
+                    <div className="space-y-1.5">
+                        <label className="text-[10px] sm:text-[11px] text-slate-400 font-semibold uppercase">Fulfillment Mode</label>
+                        <div className="grid grid-cols-2 gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setDeliveryMode('pickup')}
+                                className={`min-h-[44px] py-1.5 px-3 rounded-xl border flex items-center justify-center space-x-2 text-xs font-bold transition active:scale-95 ${
+                                    deliveryMode === 'pickup'
+                                        ? 'bg-sky-500/20 border-sky-400 text-sky-300'
+                                        : 'bg-slate-950 border-slate-800 text-slate-400'
+                                }`}
+                            >
+                                <PackageCheck className="w-4 h-4" />
+                                <span>Store Pickup</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setDeliveryMode('delivery')}
+                                className={`min-h-[44px] py-1.5 px-3 rounded-xl border flex items-center justify-center space-x-2 text-xs font-bold transition active:scale-95 ${
+                                    deliveryMode === 'delivery'
+                                        ? 'bg-sky-500/20 border-sky-400 text-sky-300'
+                                        : 'bg-slate-950 border-slate-800 text-slate-400'
+                                }`}
+                            >
+                                <Truck className="w-4 h-4" />
+                                <span>Doorstep Delivery</span>
+                            </button>
+                        </div>
+                    </div>
+                </form>
+
+                {/* ======================================================== */}
+                {/* PINNED BOTTOM SUBMIT BUTTON                              */}
+                {/* ======================================================== */}
+                <div className="p-3 sm:p-3.5 bg-slate-950 border-t border-slate-800 flex-shrink-0">
                     <button
-                        type="submit"
-                        disabled={loading}
-                        className="w-full h-12 bg-sky-500 hover:bg-sky-400 active:bg-sky-600 disabled:opacity-50 text-slate-950 font-bold text-sm rounded-xl flex items-center justify-center space-x-2 transition shadow-xl mt-4"
+                        type="button"
+                        onClick={handlePlaceOrder}
+                        disabled={isSubmitBlocked}
+                        className={`w-full min-h-[48px] sm:min-h-[52px] h-12 font-bold text-xs sm:text-sm rounded-2xl flex items-center justify-center space-x-2 transition shadow-xl active:scale-98 ${
+                            isPartialDeposit
+                                ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                                : isShortPayment
+                                    ? 'bg-rose-500/20 border border-rose-500/40 text-rose-300 cursor-not-allowed opacity-90'
+                                    : isZeroCashTendered
+                                        ? 'bg-slate-800 text-slate-400 cursor-not-allowed'
+                                        : 'bg-sky-500 hover:bg-sky-400 active:bg-sky-600 text-slate-950 disabled:opacity-40'
+                        }`}
                     >
                         {loading ? (
                             <>
                                 <Loader2 className="w-4 h-4 animate-spin" />
                                 <span>Registering Ticket #{basketTag}...</span>
+                            </>
+                        ) : isPartialDeposit ? (
+                            <>
+                                <CheckCircle2 className="w-4 h-4" />
+                                <span>
+                  Confirm Deposit {formatPHP(tenderedNum)} ({formatPHP(shortageAmount)} on Claim)
+                </span>
+                            </>
+                        ) : isShortPayment ? (
+                            <>
+                                <AlertTriangle className="w-4 h-4 text-rose-400" />
+                                <span>Kulang ng {formatPHP(shortageAmount)} (Select Action Above)</span>
+                            </>
+                        ) : isZeroCashTendered ? (
+                            <>
+                                <span>Enter Cash Received ({formatPHP(payable)})</span>
                             </>
                         ) : (
                             <>
@@ -629,7 +698,8 @@ export function CheckoutModal({
                             </>
                         )}
                     </button>
-                </form>
+                </div>
+
             </div>
         </div>
     );

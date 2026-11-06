@@ -26,15 +26,38 @@ export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
         return () => clearInterval(timer);
     }, []);
 
-    // Sync timers and done tags from localStorage & window events
+    // Sync timers and auto-purge phantom tags (like B-187) not found in active baskets
     const syncLocalState = () => {
         if (typeof window === 'undefined') return;
         try {
             const savedTimers = localStorage.getItem(LOCAL_TIMERS_KEY);
-            if (savedTimers) setLocalTimers(JSON.parse(savedTimers));
-
             const savedDone = localStorage.getItem(DONE_TAGS_KEY);
-            if (savedDone) setDoneTags(JSON.parse(savedDone));
+
+            const parsedTimers = savedTimers ? JSON.parse(savedTimers) : {};
+            const parsedDone = savedDone ? JSON.parse(savedDone) : {};
+
+            // If active baskets are loaded, remove orphan timers from cache
+            if (baskets && baskets.length > 0) {
+                const activeTagSet = new Set(
+                    baskets.map((b) => String(b.basket_tag || b.order?.order_number || '').toUpperCase())
+                );
+
+                let timersPruned = false;
+                Object.keys(parsedTimers).forEach((drumKey) => {
+                    const storedTag = String(parsedTimers[drumKey]?.basket_tag || '').toUpperCase();
+                    if (storedTag && !activeTagSet.has(storedTag)) {
+                        delete parsedTimers[drumKey];
+                        timersPruned = true;
+                    }
+                });
+
+                if (timersPruned) {
+                    localStorage.setItem(LOCAL_TIMERS_KEY, JSON.stringify(parsedTimers));
+                }
+            }
+
+            setLocalTimers(parsedTimers);
+            setDoneTags(parsedDone);
         } catch {}
     };
 
@@ -47,30 +70,37 @@ export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
             window.removeEventListener('rinset:timers-updated', handleSync);
             window.removeEventListener('rinset:order-updated', handleSync);
         };
-    }, []);
+    }, [baskets]);
 
     // Compute status and countdown for each drum
     const getDrumState = (drumName: string, type: 'washer' | 'dryer') => {
         const isWasher = type === 'washer';
         const cleanTarget = drumName.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+        const activeTagSet = new Set(
+            baskets.map((b) => String(b.basket_tag || b.order?.order_number || '').toUpperCase())
+        );
 
-        // 1. Check local timers first
+        // 1. Check local timers (only if the tag exists in active baskets)
         const timerData = localTimers[drumName];
         if (timerData && timerData.ends_at) {
-            const diff = new Date(timerData.ends_at).getTime() - Date.now();
-            const isDone = diff <= 0;
-            const totalSecs = Math.max(0, Math.floor(diff / 1000));
-            const mins = Math.floor(totalSecs / 60);
-            const secs = totalSecs % 60;
+            const tagUpper = String(timerData.basket_tag || '').toUpperCase();
 
-            return {
-                drum: drumName,
-                status: 'occupied',
-                tag: timerData.basket_tag,
-                isDone,
-                countdown: `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`,
-                orderId: timerData.order_id,
-            };
+            if (baskets.length === 0 || activeTagSet.has(tagUpper)) {
+                const diff = new Date(timerData.ends_at).getTime() - Date.now();
+                const isDone = diff <= 0;
+                const totalSecs = Math.max(0, Math.floor(diff / 1000));
+                const mins = Math.floor(totalSecs / 60);
+                const secs = totalSecs % 60;
+
+                return {
+                    drum: drumName,
+                    status: 'occupied',
+                    tag: timerData.basket_tag,
+                    isDone,
+                    countdown: `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`,
+                    orderId: timerData.order_id,
+                };
+            }
         }
 
         // 2. Check active baskets from props
@@ -150,17 +180,12 @@ export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
             await supabase
                 .from('order_baskets')
                 .update({ assigned_machine: null })
+                .eq('assigned_machine', drumName);
+
+            await supabase
+                .from('order_baskets')
+                .update({ assigned_machine: null })
                 .ilike('basket_tag', cleanTag);
-
-            await supabase
-                .from('orders')
-                .update({ drum: null })
-                .or(`basket_tag.ilike.${cleanTag},order_number.ilike.${cleanTag}`);
-
-            await supabase
-                .from('machines')
-                .update({ status: 'available', current_basket_tag: null, started_at: null, ends_at: null })
-                .eq('name', drumName);
         } catch {}
 
         window.dispatchEvent(new CustomEvent('rinset:timers-updated'));

@@ -15,7 +15,6 @@ import {
     Plus,
     Minus,
     Timer as TimerIcon,
-    CheckCircle2,
 } from 'lucide-react';
 
 export interface Machine {
@@ -97,7 +96,7 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
         }
     };
 
-    const handleExtendRunningTimer = async (machine: Machine, additionalMinutes: number) => {
+    const handleExtendRunningTimer = (machine: Machine, additionalMinutes: number) => {
         if (!machine.ends_at) return;
         const currentEnd = new Date(machine.ends_at).getTime();
         const baseTime = currentEnd > Date.now() ? currentEnd : Date.now();
@@ -114,64 +113,34 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
             localStorage.setItem(LOCAL_TIMERS_KEY, JSON.stringify(newLocal));
             window.dispatchEvent(new CustomEvent('rinset:timers-updated'));
         }
-
-        const supabase = createClient();
-        try {
-            await supabase
-                .from('machines')
-                .update({ ends_at: newEndsAt, duration_minutes: newTotalDuration })
-                .eq('name', machine.name);
-        } catch {}
     };
 
+    // Sync active orders from Supabase order_baskets
     const syncWithLiveOrders = useCallback(async () => {
         const supabase = createClient();
         try {
-            const { data: basketRows } = await supabase.from('order_baskets').select('*, order:orders(*)');
-            const { data: orderRows } = await supabase.from('orders').select('*');
+            const { data: basketRows, error } = await supabase
+                .from('order_baskets')
+                .select('*, order:orders(*)');
 
-            const unified: any[] = [];
-            const seenTags = new Set<string>();
+            if (!error && basketRows) {
+                const unified = basketRows
+                    .filter((b: any) => {
+                        const status = String(b.status || b.order?.status || '').toLowerCase();
+                        return status !== 'claimed';
+                    })
+                    .map((b: any) => ({
+                        id: b.id,
+                        order_id: b.order_id,
+                        basket_tag: String(b.basket_tag || b.order?.order_number || '').toUpperCase(),
+                        status: String(b.status || b.order?.status || 'received').toLowerCase(),
+                        assigned_machine: String(b.assigned_machine || '').toUpperCase(),
+                        customer_name: (b.order as any)?.customer_name || b.order?.customer?.full_name || '',
+                        updated_at: b.updated_at || b.created_at || b.order?.updated_at || b.order?.created_at,
+                    }));
 
-            if (basketRows && basketRows.length > 0) {
-                basketRows.forEach((b: any) => {
-                    const tag = String(b.basket_tag || b.order?.order_number || b.order?.basket_tag || '').toUpperCase();
-                    if (tag) {
-                        seenTags.add(tag);
-                        unified.push({
-                            id: b.id,
-                            order_id: b.order_id,
-                            basket_tag: tag,
-                            order_number: b.order?.order_number || tag,
-                            status: String(b.status || b.order?.status || 'received').toLowerCase(),
-                            assigned_machine: String(b.assigned_machine || b.drum || b.order?.drum || '').toUpperCase(),
-                            customer_name: (b.order as any)?.customer_name || b.order?.customer?.full_name || '',
-                            updated_at: b.updated_at || b.created_at || b.order?.updated_at || b.order?.created_at,
-                        });
-                    }
-                });
+                setActiveBaskets(unified);
             }
-
-            if (orderRows && orderRows.length > 0) {
-                orderRows.forEach((o: any) => {
-                    const tag = String(o.basket_tag || o.order_number || o.id || '').toUpperCase();
-                    if (tag && !seenTags.has(tag)) {
-                        seenTags.add(tag);
-                        unified.push({
-                            id: o.id,
-                            order_id: o.id,
-                            basket_tag: tag,
-                            order_number: o.order_number || tag,
-                            status: String(o.status || 'received').toLowerCase(),
-                            assigned_machine: String(o.drum || o.machine || '').toUpperCase(),
-                            customer_name: o.customer_name || '',
-                            updated_at: o.updated_at || o.created_at,
-                        });
-                    }
-                });
-            }
-
-            if (unified.length > 0) setActiveBaskets(unified);
         } catch (err) {
             console.error('[MachineBayModal Sync Error]', err);
         }
@@ -181,24 +150,47 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
         if (isOpen) syncWithLiveOrders();
     }, [isOpen, syncWithLiveOrders]);
 
+    // Compute machine bay state & PURGE GHOST TAGS
     const machines = useMemo<Machine[]>(() => {
+        const activeDbTags = new Set(activeBaskets.map((b) => b.basket_tag.toUpperCase()));
+        const validLocalTimers = { ...localDrumAssignments };
+        let timersNeedPruning = false;
+
+        // Prune ghost timers from localStorage
+        Object.keys(validLocalTimers).forEach((drumKey) => {
+            const storedTag = (validLocalTimers[drumKey]?.basket_tag || '').toUpperCase();
+            // If tag is not in active baskets, remove it immediately
+            if (storedTag && activeBaskets.length > 0 && !activeDbTags.has(storedTag)) {
+                delete validLocalTimers[drumKey];
+                timersNeedPruning = true;
+            }
+        });
+
+        if (timersNeedPruning && typeof window !== 'undefined') {
+            localStorage.setItem(LOCAL_TIMERS_KEY, JSON.stringify(validLocalTimers));
+        }
+
         return DEFAULT_DRUMS.map((drum) => {
             const isWasher = drum.type === 'washer';
             const targetClean = drum.name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
             const currentConfiguredDuration = bayDurations[drum.name] || drum.defaultDuration;
 
-            const localAssignment = localDrumAssignments[drum.name];
+            // 1. Check valid local timer (only if matching a real active basket)
+            const localAssignment = validLocalTimers[drum.name];
             if (localAssignment && localAssignment.ends_at) {
                 const diff = new Date(localAssignment.ends_at).getTime() - Date.now();
-                if (diff > 0) {
+                const tagUpper = (localAssignment.basket_tag || '').toUpperCase();
+
+                if (diff > 0 && (activeBaskets.length === 0 || activeDbTags.has(tagUpper))) {
+                    const matchingBasket = activeBaskets.find((b) => b.basket_tag === tagUpper);
                     return {
                         id: drum.name,
                         name: drum.name,
                         type: drum.type,
                         status: 'running',
                         current_basket_tag: localAssignment.basket_tag,
-                        customer_name: localAssignment.customer_name || null,
-                        order_id: localAssignment.order_id || null,
+                        customer_name: matchingBasket?.customer_name || localAssignment.customer_name || null,
+                        order_id: matchingBasket?.order_id || localAssignment.order_id || null,
                         started_at: localAssignment.started_at,
                         duration_minutes: localAssignment.duration_minutes || currentConfiguredDuration,
                         ends_at: localAssignment.ends_at,
@@ -206,6 +198,7 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                 }
             }
 
+            // 2. Check active baskets from database
             const assignedBasket = activeBaskets.find((b) => {
                 const basketStatus = String(b.status || '').toLowerCase();
                 const matchesType = isWasher
@@ -262,7 +255,7 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
             .filter((b) => {
                 const status = String(b.status || '').toLowerCase();
                 const isQueue = status === 'received' || status === 'queue' || status === 'pending';
-                const tag = String(b.basket_tag || b.order_number || '').toUpperCase();
+                const tag = String(b.basket_tag).toUpperCase();
                 return isQueue && !activeOccupiedTags.has(tag);
             })
             .map((b) => ({
@@ -288,7 +281,7 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
 
         activeBaskets.forEach((b) => {
             const status = String(b.status || '').toLowerCase();
-            const tag = String(b.basket_tag || b.order_number || '').toUpperCase();
+            const tag = String(b.basket_tag).toUpperCase();
             const isWashing = status === 'washing' || status === 'wash' || status === 'in_wash';
 
             if (isWashing && !list.some((item) => item.tag === tag)) {
@@ -306,6 +299,7 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
 
     if (!isOpen) return null;
 
+    // Appoint tag and auto-start cycle
     const handleAppointAndStart = async (machine: Machine, appointedTag: string) => {
         const cleanTag = appointedTag.trim().toUpperCase();
         if (!cleanTag) return;
@@ -339,6 +333,7 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
 
         setActiveBasketInputs((prev) => ({ ...prev, [machine.name]: '' }));
 
+        // Update Supabase order_baskets directly
         const supabase = createClient();
         try {
             await supabase
@@ -349,27 +344,9 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                     updated_at: now.toISOString(),
                 })
                 .ilike('basket_tag', cleanTag);
-
-            await supabase
-                .from('orders')
-                .update({
-                    status: targetStatus,
-                    drum: machine.name,
-                    updated_at: now.toISOString(),
-                })
-                .or(`basket_tag.ilike.${cleanTag},order_number.ilike.${cleanTag}`);
-
-            await supabase
-                .from('machines')
-                .update({
-                    status: 'running',
-                    current_basket_tag: cleanTag,
-                    started_at: now.toISOString(),
-                    ends_at: endsAt.toISOString(),
-                    duration_minutes: duration,
-                })
-                .eq('name', machine.name);
-        } catch {}
+        } catch (err) {
+            console.warn('[Auto-Appoint DB Sync Warning]', err);
+        }
 
         if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('rinset:order-updated'));
@@ -378,11 +355,13 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
         router.refresh();
     };
 
+    // CLEAR DRUM: Frees bay, unsets machine assignment in DB, and clears ghost data
     const handleClearMachine = async (machine: Machine) => {
         const cleanTag = machine.current_basket_tag ? machine.current_basket_tag.toUpperCase() : null;
         const stage = machine.type === 'washer' ? 'wash_done' : 'dry_done';
         const label = machine.type === 'washer' ? 'WASH DONE' : 'DRY DONE';
 
+        // 1. Mark done tag in localStorage
         if (cleanTag) {
             try {
                 const savedDone = localStorage.getItem(DONE_TAGS_KEY);
@@ -397,6 +376,7 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
             } catch {}
         }
 
+        // 2. Clear from local state immediately
         const newLocal = { ...localDrumAssignments };
         delete newLocal[machine.name];
         setLocalDrumAssignments(newLocal);
@@ -405,24 +385,32 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
             window.dispatchEvent(new CustomEvent('rinset:timers-updated'));
         }
 
+        // Immediately remove machine assignment in React state
+        setActiveBaskets((prev) =>
+            prev.map((b) =>
+                b.assigned_machine === machine.name || (cleanTag && b.basket_tag === cleanTag)
+                    ? { ...b, assigned_machine: '' }
+                    : b
+            )
+        );
+
+        // 3. Update Supabase order_baskets safely (no invalid tables/columns)
         const supabase = createClient();
         try {
+            await supabase
+                .from('order_baskets')
+                .update({ assigned_machine: null })
+                .eq('assigned_machine', machine.name);
+
             if (cleanTag) {
                 await supabase
                     .from('order_baskets')
                     .update({ assigned_machine: null })
                     .ilike('basket_tag', cleanTag);
-
-                await supabase
-                    .from('orders')
-                    .update({ drum: null })
-                    .or(`basket_tag.ilike.${cleanTag},order_number.ilike.${cleanTag}`);
             }
-            await supabase
-                .from('machines')
-                .update({ status: 'available', current_basket_tag: null, started_at: null, ends_at: null })
-                .eq('name', machine.name);
-        } catch {}
+        } catch (err) {
+            console.warn('[Clear Machine DB Sync Warning]', err);
+        }
 
         await syncWithLiveOrders();
         if (typeof window !== 'undefined') {

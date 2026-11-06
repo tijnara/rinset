@@ -138,11 +138,15 @@ export function useLiveOrders() {
         );
 
         // 2. Update order_baskets record scoped by store_id
-        await supabase
+        const { error: basketUpdateErr } = await supabase
             .from('order_baskets')
             .update(updatePayload)
             .eq('id', basketId)
             .eq('store_id', activeStoreId);
+
+        if (basketUpdateErr) {
+            console.error('[Update Basket Error]', basketUpdateErr);
+        }
 
         // 3. Sync parent order status based on sibling baskets
         const { data: siblingBaskets } = await supabase
@@ -154,7 +158,7 @@ export function useLiveOrders() {
         if (siblingBaskets && siblingBaskets.length > 0) {
             const allClaimed = siblingBaskets.every((b) => b.status === 'claimed');
             const allReadyOrClaimed = siblingBaskets.every(
-                (b) => b.status === 'ready_for_pickup' || b.status === 'claimed'
+                (b) => b.status === 'ready_for_pickup' || b.status === 'ready' || b.status === 'claimed'
             );
             const anyWashingOrDrying = siblingBaskets.some(
                 (b) => b.status === 'washing' || b.status === 'drying'
@@ -166,17 +170,21 @@ export function useLiveOrders() {
             } else if (allReadyOrClaimed) {
                 computedOrderStatus = 'ready_for_pickup';
             } else if (anyWashingOrDrying) {
-                computedOrderStatus = 'washing';
+                const hasWashing = siblingBaskets.some((b) => b.status === 'washing');
+                computedOrderStatus = hasWashing ? 'washing' : 'drying';
             }
 
-            await supabase
+            const { error: orderUpdateErr } = await supabase
                 .from('orders')
                 .update({
                     status: computedOrderStatus,
-                    updated_at: new Date().toISOString(),
                 })
                 .eq('id', orderId)
                 .eq('store_id', activeStoreId);
+
+            if (orderUpdateErr) {
+                console.error('[Sync Order Status Error]', orderUpdateErr.message, orderUpdateErr.details);
+            }
         }
 
         fetchBaskets();
