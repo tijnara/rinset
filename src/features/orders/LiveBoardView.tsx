@@ -37,6 +37,8 @@ const LANES: LaneConfig[] = [
     { key: 'claimed', label: 'Claimed', icon: PackageCheck, color: 'text-slate-500 border-slate-700' },
 ];
 
+const LOCAL_TIMERS_KEY = 'rinset_active_drum_timers';
+
 export function LiveBoardView() {
     const storeId = useAuthStore((state) => state.storeId);
     const authStoreName = useAuthStore((state) => state.storeName);
@@ -87,6 +89,68 @@ export function LiveBoardView() {
         await updateBasketStatus(storageTarget.id, storageTarget.order_id, 'ready_for_pickup', null);
 
         setStorageTarget(null);
+        refreshOrders();
+    };
+
+    // Automatically start cycle timer when a machine drum is appointed
+    const handleAssignMachineAndStartTimer = async (
+        basketId: string,
+        orderId: string,
+        nextStatus: OrderStatus,
+        machineId: string
+    ) => {
+        await updateBasketStatus(basketId, orderId, nextStatus, machineId);
+
+        const isDryer = machineId.toUpperCase().startsWith('D') || nextStatus === 'drying';
+        const durationMinutes = isDryer ? 45 : 35;
+        const now = new Date();
+        const endsAt = new Date(now.getTime() + durationMinutes * 60 * 1000);
+        const cleanBasketTag = assignTarget?.basket?.basket_tag || '';
+
+        // 1. Sync timer state into local storage for immediate cross-component sync
+        try {
+            const saved = localStorage.getItem(LOCAL_TIMERS_KEY);
+            const timers = saved ? JSON.parse(saved) : {};
+
+            // If moving from another drum, clear previous assignment
+            Object.keys(timers).forEach((k) => {
+                if (timers[k]?.basket_tag?.toUpperCase() === cleanBasketTag.toUpperCase()) {
+                    delete timers[k];
+                }
+            });
+
+            timers[machineId.toUpperCase()] = {
+                basket_tag: cleanBasketTag,
+                started_at: now.toISOString(),
+                ends_at: endsAt.toISOString(),
+                status: 'running',
+                type: isDryer ? 'dryer' : 'washer',
+                duration_minutes: durationMinutes,
+            };
+
+            localStorage.setItem(LOCAL_TIMERS_KEY, JSON.stringify(timers));
+        } catch {
+            // Ignored
+        }
+
+        // 2. Also sync to machines table if present
+        try {
+            const supabase = createClient();
+            await supabase
+                .from('machines')
+                .update({
+                    status: 'running',
+                    current_basket_tag: cleanBasketTag,
+                    started_at: now.toISOString(),
+                    ends_at: endsAt.toISOString(),
+                })
+                .eq('name', machineId.toUpperCase());
+        } catch {
+            // Ignored
+        }
+
+        setAssignTarget(null);
+        window.dispatchEvent(new CustomEvent('rinset:order-updated'));
         refreshOrders();
     };
 
@@ -161,9 +225,7 @@ export function LiveBoardView() {
                 activeBaskets={baskets}
                 isOpen={Boolean(assignTarget)}
                 onClose={() => setAssignTarget(null)}
-                onConfirm={(basketId, orderId, nextStatus, machineId) => {
-                    updateBasketStatus(basketId, orderId, nextStatus, machineId);
-                }}
+                onConfirm={handleAssignMachineAndStartTimer}
             />
 
             {/* Storage Shelf / Cubby Modal */}

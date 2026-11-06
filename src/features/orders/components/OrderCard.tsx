@@ -1,9 +1,18 @@
 'use client';
 
+import { useState, useEffect, useCallback } from 'react';
 import { OrderBasket, Order, OrderStatus } from '@/types/database';
 import { formatPHP } from '@/lib/formatters';
 import { Bubbles } from '@/components/icons/Bubbles';
-import { ArrowRight, DollarSign, Wind, MapPin, AlertTriangle } from 'lucide-react';
+import {
+    ArrowRight,
+    DollarSign,
+    Wind,
+    MapPin,
+    AlertTriangle,
+    Clock,
+    CheckCircle2,
+} from 'lucide-react';
 
 interface OrderCardProps {
     basket: OrderBasket;
@@ -12,6 +21,9 @@ interface OrderCardProps {
     onRequestStorage?: (basket: OrderBasket) => void;
     onSettle: (order: Order) => void;
 }
+
+const LOCAL_TIMERS_KEY = 'rinset_active_drum_timers';
+const DONE_TAGS_KEY = 'rinset_done_tags';
 
 export function OrderCard({
                               basket,
@@ -25,6 +37,16 @@ export function OrderCard({
     const isClaimed = basket.status === 'claimed';
     const isUnpaid = Boolean(parentOrder && parentOrder.payment_status !== 'paid');
 
+    const [, setTick] = useState(0);
+
+    // Per-second tick to update countdown timer on active cards
+    useEffect(() => {
+        if (basket.status === 'washing' || basket.status === 'drying') {
+            const timer = setInterval(() => setTick((t) => t + 1), 1000);
+            return () => clearInterval(timer);
+        }
+    }, [basket.status]);
+
     // Overdue Logic
     const msInDay = 1000 * 60 * 60 * 24;
     const daysOld = parentOrder
@@ -33,6 +55,71 @@ export function OrderCard({
     const isOverdue14 = isReady && daysOld >= 14;
     const isOverdue30 = isReady && daysOld >= 30;
     const storageFee = isOverdue14 ? (daysOld - 14) * 10 : 0;
+
+    // Retrieve timer & completion state
+    const getTimerInfo = useCallback(() => {
+        if (typeof window === 'undefined') return null;
+        const cleanTag = String(basket.basket_tag || parentOrder?.order_number || '').toUpperCase();
+
+        // 1. Check if marked done (via Clear Drum)
+        let doneRecord = null;
+        try {
+            const doneMap = JSON.parse(localStorage.getItem(DONE_TAGS_KEY) || '{}');
+            doneRecord = doneMap[cleanTag] || null;
+        } catch {}
+
+        const isWashing = basket.status === 'washing';
+        const isDrying = basket.status === 'drying';
+
+        if (isWashing && doneRecord?.stage === 'wash_done') {
+            return { isDone: true, label: doneRecord.label || 'WASH DONE', drum: doneRecord.drum || basket.assigned_machine };
+        }
+        if (isDrying && doneRecord?.stage === 'dry_done') {
+            return { isDone: true, label: doneRecord.label || 'DRY DONE', drum: doneRecord.drum || basket.assigned_machine };
+        }
+
+        // 2. Check active drum timers
+        let activeTimer = null;
+        try {
+            const timersMap = JSON.parse(localStorage.getItem(LOCAL_TIMERS_KEY) || '{}');
+            if (basket.assigned_machine && timersMap[basket.assigned_machine.toUpperCase()]) {
+                activeTimer = timersMap[basket.assigned_machine.toUpperCase()];
+            } else {
+                activeTimer = Object.values(timersMap).find(
+                    (t: any) => t?.basket_tag?.toUpperCase() === cleanTag
+                );
+            }
+        } catch {}
+
+        let endsAtMs = 0;
+        if (activeTimer?.ends_at) {
+            endsAtMs = new Date(activeTimer.ends_at).getTime();
+        } else if (basket.assigned_machine) {
+            const defaultMins = isWashing ? 35 : 45;
+            const startTime = new Date(basket.updated_at || basket.created_at || Date.now()).getTime();
+            endsAtMs = startTime + defaultMins * 60 * 1000;
+        }
+
+        if (endsAtMs > 0) {
+            const diff = endsAtMs - Date.now();
+            if (diff <= 0) {
+                return {
+                    isCycleComplete: true,
+                    label: isWashing ? 'WASH COMPLETE' : 'DRY COMPLETE',
+                    drum: basket.assigned_machine,
+                };
+            }
+            const totalSecs = Math.floor(diff / 1000);
+            const mins = Math.floor(totalSecs / 60);
+            const secs = totalSecs % 60;
+            return {
+                countdown: `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`,
+                drum: basket.assigned_machine,
+            };
+        }
+
+        return null;
+    }, [basket, parentOrder]);
 
     const getNextTransition = (current: OrderStatus): { next: OrderStatus; label: string } | null => {
         switch (current) {
@@ -57,6 +144,18 @@ export function OrderCard({
             onSettle(parentOrder);
             return;
         }
+
+        // Clean up stage completion tag when moving forward
+        const cleanTag = String(basket.basket_tag || parentOrder?.order_number || '').toUpperCase();
+        try {
+            const doneMap = JSON.parse(localStorage.getItem(DONE_TAGS_KEY) || '{}');
+            if (doneMap[cleanTag]) {
+                delete doneMap[cleanTag];
+                localStorage.setItem(DONE_TAGS_KEY, JSON.stringify(doneMap));
+                window.dispatchEvent(new CustomEvent('rinset:timers-updated'));
+            }
+        } catch {}
+
         if (transition.next === 'washing' || transition.next === 'drying') {
             onRequestAssign(basket, transition.next);
             return;
@@ -71,6 +170,9 @@ export function OrderCard({
         }
         onAdvance(basket.id, basket.order_id, transition.next);
     };
+
+    const timerInfo = getTimerInfo();
+    const drumDisplay = basket.assigned_machine || timerInfo?.drum;
 
     return (
         <div
@@ -116,20 +218,61 @@ export function OrderCard({
                 <div className="px-2 py-1 rounded bg-rose-500/20 text-rose-400 text-[10px] font-bold flex items-center space-x-1.5 border border-rose-500/30">
                     <AlertTriangle className="w-3 h-3 flex-shrink-0" />
                     <span>
-            {isOverdue30 ? `ABANDONED (${daysOld} days)` : `OVERDUE (${daysOld} days)`} • +{formatPHP(storageFee)} fee
+            {isOverdue30 ? `ABANDONED (${daysOld} days)` : `OVERDUE (${daysOld} days)`} + {formatPHP(storageFee)} fee
           </span>
                 </div>
             )}
 
-            {/* Machine or Storage Badge */}
-            {basket.assigned_machine && (basket.status === 'washing' || basket.status === 'drying') && (
-                <div className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold flex items-center justify-between border bg-slate-900 border-slate-700">
-          <span className="flex items-center gap-1.5 text-[11px] text-slate-300">
-            {basket.status === 'washing' ? <Bubbles className="w-3.5 h-3.5" /> : <Wind className="w-3.5 h-3.5" />}
-              <span>Drum:</span>
-          </span>
-                    <span className="text-white text-xs">{basket.assigned_machine}</span>
-                </div>
+            {/* Drum & Live Countdown / Done Status Badge */}
+            {(basket.status === 'washing' || basket.status === 'drying') && (
+                <>
+                    {timerInfo?.isDone ? (
+                        <div className="px-2.5 py-1.5 rounded-lg text-xs font-mono font-bold flex items-center justify-between border bg-emerald-500/15 border-emerald-500/40 text-emerald-300">
+              <span className="flex items-center gap-1.5 text-[11px]">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{timerInfo.label}</span>
+              </span>
+                            {drumDisplay && (
+                                <span className="text-[11px] text-emerald-400/80 font-normal">
+                  ({drumDisplay})
+                </span>
+                            )}
+                        </div>
+                    ) : timerInfo?.isCycleComplete ? (
+                        <div className="px-2.5 py-1.5 rounded-lg text-xs font-mono font-bold flex items-center justify-between border bg-rose-500/15 border-rose-500/40 text-rose-300 animate-pulse">
+              <span className="flex items-center gap-1.5 text-[11px]">
+                <Clock className="w-3.5 h-3.5 text-rose-400" />
+                <span>{timerInfo.label}</span>
+              </span>
+                            {drumDisplay && <span className="text-white text-xs">{drumDisplay}</span>}
+                        </div>
+                    ) : drumDisplay ? (
+                        <div className="px-2.5 py-1.5 rounded-lg text-xs font-mono font-bold flex items-center justify-between border bg-slate-900 border-slate-700">
+              <span className="flex items-center gap-1.5 text-[11px] text-slate-300">
+                {basket.status === 'washing' ? (
+                    <Bubbles className="w-3.5 h-3.5 text-sky-400" />
+                ) : (
+                    <Wind className="w-3.5 h-3.5 text-amber-400" />
+                )}
+                  <span>Drum:</span>
+                <strong className="text-white">{drumDisplay}</strong>
+              </span>
+
+                            {timerInfo?.countdown ? (
+                                <span
+                                    className={`font-mono text-xs font-bold flex items-center gap-1 ${
+                                        basket.status === 'washing' ? 'text-sky-400' : 'text-amber-400'
+                                    }`}
+                                >
+                  <Clock className="w-3 h-3" />
+                  <span>{timerInfo.countdown} left</span>
+                </span>
+                            ) : (
+                                <span className="text-[10px] text-slate-500 font-normal">In Progress</span>
+                            )}
+                        </div>
+                    ) : null}
+                </>
             )}
 
             {parentOrder?.storage_location && isReady && (
@@ -147,7 +290,9 @@ export function OrderCard({
                     className={`w-full py-2 rounded-lg text-xs font-bold border flex items-center justify-center space-x-1.5 transition ${
                         isReady && isUnpaid
                             ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border-rose-500/30'
-                            : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+                            : timerInfo?.isDone
+                                ? 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/40'
+                                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
                     }`}
                 >
                     {isReady && isUnpaid && parentOrder ? (

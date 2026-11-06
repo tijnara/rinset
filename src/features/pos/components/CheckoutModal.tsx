@@ -17,6 +17,10 @@ import {
     Receipt,
     User,
     Phone,
+    Zap,
+    ShieldAlert,
+    Layers,
+    Sparkles,
 } from 'lucide-react';
 
 interface CheckoutModalProps {
@@ -25,6 +29,14 @@ interface CheckoutModalProps {
     onClose: () => void;
     onSuccess: (orderNumber: string) => void;
 }
+
+const COMMON_INSPECTION_TAGS = [
+    'Pre-existing Tear',
+    'Color Bleed Risk',
+    'Deep Stain / Collar',
+    'Missing / Loose Button',
+    'Delicate Fabric',
+];
 
 export function CheckoutModal({
                                   storeId: propStoreId,
@@ -43,6 +55,7 @@ export function CheckoutModal({
         getBreakdown,
         clearCart,
         setCustomer,
+        addItem,
     } = useCartStore();
 
     const breakdown = getBreakdown();
@@ -53,17 +66,32 @@ export function CheckoutModal({
     const [deliveryAddress, setDeliveryAddress] = useState('');
     const [cashTendered, setCashTendered] = useState<string>('');
     const [storageLocation, setStorageLocation] = useState('');
+    const [isRush, setIsRush] = useState(false);
+    const [selectedTags, setSelectedTags] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
     if (!isOpen) return null;
 
-    const payable = breakdown.netPayable;
+    // Detect 8kg washer drum capacity overload
+    const totalKilos = breakdown.items
+        .filter((i) => i.pricingType === 'per_kilo')
+        .reduce((sum, i) => sum + (i.quantity || 0), 0);
+    const isOverweight = totalKilos > 8;
+
+    const RUSH_SURCHARGE = 80;
+    const payable = breakdown.netPayable + (isRush ? RUSH_SURCHARGE : 0);
     const tenderedNum = parseFloat(cashTendered) || 0;
     const changeDue = Math.max(0, tenderedNum - payable);
 
     const handleQuickCash = (amount: number) => {
         setCashTendered(amount.toString());
+    };
+
+    const toggleTag = (tag: string) => {
+        setSelectedTags((prev) =>
+            prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+        );
     };
 
     const handlePlaceOrder = async (e: React.FormEvent) => {
@@ -141,7 +169,7 @@ export function CheckoutModal({
                 user?.id || ''
             );
 
-            // 3. Insert into orders table with store_id and basket_tag
+            // 3. Insert into orders table with store_id, basket_tag, rush fee, and inspection tags
             const { data: orderData, error: orderError } = await supabase
                 .from('orders')
                 .insert({
@@ -156,10 +184,13 @@ export function CheckoutModal({
                     delivery_address: deliveryMode === 'delivery' ? deliveryAddress.trim() : null,
                     storage_location: storageLocation.trim() || null,
                     special_notes: notes ? [notes] : [],
+                    special_handling_tags: selectedTags,
                     subtotal: breakdown.subtotal,
                     delivery_fee: 0,
                     discount: calculatedDiscount || 0,
-                    net_payable: breakdown.netPayable,
+                    is_rush: isRush,
+                    rush_fee: isRush ? RUSH_SURCHARGE : 0,
+                    net_payable: payable,
                     payment_status: paymentStatus,
                     payment_method: paymentMethod,
                     cashier_id: isCashierUuid ? user?.id : null,
@@ -243,15 +274,33 @@ export function CheckoutModal({
                         </div>
                     )}
 
+                    {/* Overweight Capacity Notice */}
+                    {isOverweight && (
+                        <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-start space-x-2.5">
+                            <Layers className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                            <div>
+                                <p className="font-bold">Machine Capacity Warning ({totalKilos.toFixed(1)} kg)</p>
+                                <p className="text-[11px] text-amber-300/80 mt-0.5">
+                                    Exceeds standard 8kg washer drum capacity. Recommend splitting laundry into 2 machines ({basketTag}-A & {basketTag}-B).
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Ticket Total Summary */}
                     <div className="bg-slate-950 border border-slate-800/90 rounded-2xl p-4 flex justify-between items-center">
                         <div>
                             <p className="text-[11px] text-slate-400 uppercase font-bold tracking-wider">
                                 Total Due ({breakdown.items.length} items)
                             </p>
-                            <p className="text-xs font-mono text-sky-400 mt-0.5">
-                                Tag: <span className="font-bold uppercase text-white">{basketTag}</span>
-                            </p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                                <span className="text-xs font-mono text-sky-400 font-bold uppercase">{basketTag}</span>
+                                {isRush && (
+                                    <span className="text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
+                    <Zap className="w-2.5 h-2.5" /> Rush (+₱80)
+                  </span>
+                                )}
+                            </div>
                         </div>
                         <div className="text-right">
               <span className="font-mono text-2xl font-black text-emerald-400">
@@ -260,7 +309,79 @@ export function CheckoutModal({
                         </div>
                     </div>
 
-                    {/* Customer Details Confirmation */}
+                    {/* Quick Consumables Bar */}
+                    <div className="space-y-1.5">
+            <span className="text-[11px] text-slate-400 font-semibold uppercase flex items-center gap-1">
+              <Sparkles className="w-3 h-3 text-sky-400" /> Quick Add Consumables
+            </span>
+                        <div className="flex gap-1.5 overflow-x-auto pb-1">
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    addItem({
+                                        id: 'cons-ariel',
+                                        name: 'Ariel Liquid Pod',
+                                        category: 'CONSUMABLES',
+                                        pricing_type: 'per_piece',
+                                        pricingType: 'per_piece',
+                                        unit_price: 18,
+                                        unitPrice: 18,
+                                        minimum_quantity: 1,
+                                        minimumQuantity: 1,
+                                        is_active: true,
+                                        isActive: true,
+                                    } as any)
+                                }
+                                className="px-2.5 py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl text-[11px] font-semibold whitespace-nowrap transition"
+                            >
+                                + Ariel Pod (₱18)
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    addItem({
+                                        id: 'cons-downy',
+                                        name: 'Downy FabCon Sachet',
+                                        category: 'CONSUMABLES',
+                                        pricing_type: 'per_piece',
+                                        pricingType: 'per_piece',
+                                        unit_price: 14,
+                                        unitPrice: 14,
+                                        minimum_quantity: 1,
+                                        minimumQuantity: 1,
+                                        is_active: true,
+                                        isActive: true,
+                                    } as any)
+                                }
+                                className="px-2.5 py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl text-[11px] font-semibold whitespace-nowrap transition"
+                            >
+                                + Downy FabCon (₱14)
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    addItem({
+                                        id: 'cons-bleach',
+                                        name: 'Color-Safe Bleach Shot',
+                                        category: 'CONSUMABLES',
+                                        pricing_type: 'per_piece',
+                                        pricingType: 'per_piece',
+                                        unit_price: 12,
+                                        unitPrice: 12,
+                                        minimum_quantity: 1,
+                                        minimumQuantity: 1,
+                                        is_active: true,
+                                        isActive: true,
+                                    } as any)
+                                }
+                                className="px-2.5 py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl text-[11px] font-semibold whitespace-nowrap transition"
+                            >
+                                + Color Bleach (₱12)
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Customer Confirmation */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         <div className="space-y-1">
                             <label className="text-[11px] text-slate-400 font-semibold uppercase">Customer</label>
@@ -292,7 +413,50 @@ export function CheckoutModal({
                         </div>
                     </div>
 
-                    {/* Delivery vs Store Pickup Toggle */}
+                    {/* Pre-Wash Garment Inspection Checklist */}
+                    <div className="space-y-1.5">
+                        <label className="text-[11px] text-slate-400 font-semibold uppercase flex items-center gap-1">
+                            <ShieldAlert className="w-3 h-3 text-amber-400" /> Pre-Wash Garment Inspection
+                        </label>
+                        <div className="flex flex-wrap gap-1.5">
+                            {COMMON_INSPECTION_TAGS.map((tag) => {
+                                const isSelected = selectedTags.includes(tag);
+                                return (
+                                    <button
+                                        key={tag}
+                                        type="button"
+                                        onClick={() => toggleTag(tag)}
+                                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition ${
+                                            isSelected
+                                                ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                                        }`}
+                                    >
+                                        {tag}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Rush / Express Surcharge Toggle */}
+                    <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-950 border border-slate-800">
+                        <div className="flex items-center space-x-2">
+                            <Zap className={`w-4 h-4 ${isRush ? 'text-amber-400' : 'text-slate-500'}`} />
+                            <div>
+                                <p className="text-xs font-bold text-white">Express / Rush Turnaround (+₱80)</p>
+                                <p className="text-[10px] text-slate-400">Guaranteed 4-to-6 hour priority turnaround</p>
+                            </div>
+                        </div>
+                        <input
+                            type="checkbox"
+                            checked={isRush}
+                            onChange={(e) => setIsRush(e.target.checked)}
+                            className="w-4 h-4 accent-sky-500 rounded cursor-pointer"
+                        />
+                    </div>
+
+                    {/* Fulfillment Mode */}
                     <div className="space-y-1.5">
                         <label className="text-[11px] text-slate-400 font-semibold uppercase">Fulfillment Mode</label>
                         <div className="grid grid-cols-2 gap-2">
@@ -390,7 +554,7 @@ export function CheckoutModal({
                         </div>
                     </div>
 
-                    {/* Cash Calculation */}
+                    {/* Cash Calculations */}
                     {paymentMethod === 'cash' && paymentStatus === 'paid' && (
                         <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
                             <div className="flex justify-between items-center">
@@ -408,7 +572,6 @@ export function CheckoutModal({
                                 </div>
                             </div>
 
-                            {/* Quick Cash Buttons */}
                             <div className="flex space-x-1.5 justify-end">
                                 {[payable, Math.ceil(payable / 100) * 100, 500, 1000].map((amt, idx) => (
                                     <button
@@ -434,7 +597,7 @@ export function CheckoutModal({
                     {/* Storage Slot */}
                     <div className="space-y-1">
                         <label className="text-[11px] text-slate-400 font-semibold uppercase">
-                            Storage Slot / Rack Shelf (Optional)
+                            Storage Slot / Shelf Rack (Optional)
                         </label>
                         <input
                             type="text"

@@ -17,6 +17,7 @@ interface KanbanColumnProps {
 }
 
 export function KanbanColumn({
+                                 statusKey,
                                  label,
                                  icon: Icon,
                                  colorClass,
@@ -27,7 +28,7 @@ export function KanbanColumn({
                                  onSettle,
                              }: KanbanColumnProps) {
     return (
-        <div className="w-80 flex-shrink-0 bg-slate-900/60 border border-slate-800 rounded-2xl flex flex-col max-h-[calc(100vh-12rem)]">
+        <div className="w-80 flex-shrink-0 bg-slate-900/60 border border-slate-800 rounded-2xl flex flex-col max-h-[calc(100vh-12rem)] select-none">
             <div className="p-3.5 border-b border-slate-800 flex justify-between items-center bg-slate-900/80 rounded-t-2xl">
                 <div className="flex items-center space-x-2">
                     <Icon className={`w-4 h-4 ${colorClass}`} />

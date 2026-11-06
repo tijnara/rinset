@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore, PinPad } from '@/features/auth';
+import { MachineBayModal } from '@/features/machines/MachineBayModal';
 import { RinsetLogo } from '@/components/icons/RinsetLogo';
 import {
     LayoutDashboard,
@@ -16,6 +17,7 @@ import {
     Lock,
     X,
     LogOut,
+    Timer,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -27,6 +29,7 @@ export function Navbar({ storeName: propStoreName }: NavbarProps) {
     const router = useRouter();
     const { user, storeName: authStoreName, loginWithPin, lockToCashier, logout } = useAuthStore();
     const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+    const [isMachineBayOpen, setIsMachineBayOpen] = useState(false);
     const [pinError, setPinError] = useState<string | null>(null);
 
     const isOwner = user?.role === 'owner';
@@ -108,8 +111,21 @@ export function Navbar({ storeName: propStoreName }: NavbarProps) {
                     })}
                 </nav>
 
-                {/* Right: Shift Status & Logout */}
+                {/* Right: Machine Timers + Shift Status & Logout */}
                 <div className="flex items-center space-x-2 flex-shrink-0">
+                    {/* Machine Bay Quick Trigger */}
+                    <button
+                        type="button"
+                        onClick={() => setIsMachineBayOpen(true)}
+                        className="h-8 px-2.5 bg-slate-800/80 hover:bg-slate-700 active:bg-slate-600 border border-slate-700 text-slate-300 hover:text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 transition shadow-sm"
+                        title="Commercial Washer & Dryer Bay Timers"
+                    >
+                        <Timer className="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />
+                        <span className="hidden md:inline">Machine Bay</span>
+                    </button>
+
+                    <div className="h-5 w-px bg-slate-800 mx-0.5" />
+
                     {isOwner ? (
                         <div className="flex items-center space-x-1.5">
               <span
@@ -117,7 +133,7 @@ export function Navbar({ storeName: propStoreName }: NavbarProps) {
                   className="px-2.5 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold rounded-xl flex items-center space-x-1.5 shadow-sm"
               >
                 <Shield className="w-3.5 h-3.5 flex-shrink-0 text-amber-400" />
-                <span>Store Owner</span>
+                <span className="hidden sm:inline">Store Owner</span>
               </span>
 
                             <button
@@ -145,7 +161,7 @@ export function Navbar({ storeName: propStoreName }: NavbarProps) {
                         </button>
                     )}
 
-                    <div className="h-5 w-px bg-slate-800 mx-1" />
+                    <div className="h-5 w-px bg-slate-800 mx-0.5" />
 
                     <button
                         type="button"
@@ -195,7 +211,13 @@ export function Navbar({ storeName: propStoreName }: NavbarProps) {
                 </div>
             </nav>
 
-            {/* 3. PIN Unlock Modal */}
+            {/* 3. Machine Bay Modal */}
+            <MachineBayModal
+                isOpen={isMachineBayOpen}
+                onClose={() => setIsMachineBayOpen(false)}
+            />
+
+            {/* 4. PIN Unlock Modal */}
             {isAuthModalOpen && (
                 <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                     <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative">
