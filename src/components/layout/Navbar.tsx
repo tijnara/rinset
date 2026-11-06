@@ -28,11 +28,16 @@ export function Navbar({ storeName: propStoreName }: NavbarProps) {
     const pathname = usePathname();
     const router = useRouter();
     const { user, storeName: authStoreName, loginWithPin, lockToCashier, logout } = useAuthStore();
+    const rawRole = useAuthStore((state) => (state as any).role || state.user?.role);
+    const isUnlocked = useAuthStore((state) => (state as any).isUnlocked);
+
+    // OWNER VERIFICATION: Strictly 'owner' or cashier with active unlocked PIN session
+    const isOwner = String(rawRole || (user as any)?.role) === 'owner' || Boolean(isUnlocked);
+
     const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
     const [isMachineBayOpen, setIsMachineBayOpen] = useState(false);
     const [pinError, setPinError] = useState<string | null>(null);
 
-    const isOwner = user?.role === 'owner';
     const displayStoreName = propStoreName || authStoreName || 'Rinset Laundry';
 
     const links = [
@@ -113,18 +118,20 @@ export function Navbar({ storeName: propStoreName }: NavbarProps) {
 
                 {/* Right: Machine Timers + Shift Status & Logout */}
                 <div className="flex items-center space-x-2 flex-shrink-0">
-                    {/* Machine Bay Quick Trigger */}
-                    <button
-                        type="button"
-                        onClick={() => setIsMachineBayOpen(true)}
-                        className="h-8 px-2.5 bg-slate-800/80 hover:bg-slate-700 active:bg-slate-600 border border-slate-700 text-slate-300 hover:text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 transition shadow-sm"
-                        title="Commercial Washer & Dryer Bay Timers"
-                    >
-                        <Timer className="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />
-                        <span className="hidden md:inline">Machine Bay</span>
-                    </button>
+                    {/* Machine Bay Quick Trigger: OWNER ONLY */}
+                    {isOwner && (
+                        <button
+                            type="button"
+                            onClick={() => setIsMachineBayOpen(true)}
+                            className="h-8 px-2.5 bg-slate-800/80 hover:bg-slate-700 active:bg-slate-600 border border-slate-700 text-slate-300 hover:text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 transition shadow-sm"
+                            title="Commercial Washer & Dryer Bay Timers (Owner Only)"
+                        >
+                            <Timer className="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />
+                            <span className="hidden md:inline">Machine Bay</span>
+                        </button>
+                    )}
 
-                    <div className="h-5 w-px bg-slate-800 mx-0.5" />
+                    {isOwner && <div className="h-5 w-px bg-slate-800 mx-0.5" />}
 
                     {isOwner ? (
                         <div className="flex items-center space-x-1.5">
@@ -211,11 +218,13 @@ export function Navbar({ storeName: propStoreName }: NavbarProps) {
                 </div>
             </nav>
 
-            {/* 3. Machine Bay Modal */}
-            <MachineBayModal
-                isOpen={isMachineBayOpen}
-                onClose={() => setIsMachineBayOpen(false)}
-            />
+            {/* 3. Machine Bay Modal (Mounted only when Owner is active) */}
+            {isOwner && (
+                <MachineBayModal
+                    isOpen={isMachineBayOpen}
+                    onClose={() => setIsMachineBayOpen(false)}
+                />
+            )}
 
             {/* 4. PIN Unlock Modal */}
             {isAuthModalOpen && (

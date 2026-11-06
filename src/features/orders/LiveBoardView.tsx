@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, ComponentType } from 'react';
+import { useState, ComponentType, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { OrderBasket, Order, OrderStatus } from '@/types/database';
 import { useLiveOrders } from '@/features/orders/hooks/useLiveOrders';
 import { useAuthStore } from '@/features/auth/store/useAuthStore';
+import { useBarcodeScanner } from '@/hooks/useBarcodeScanner';
 import { KanbanColumn } from '@/features/orders/components/KanbanColumn';
 import { SettleClaimModal } from '@/features/orders/components/SettleClaimModal';
 import { QrScannerModal } from '@/features/orders/components/QrScannerModal';
@@ -20,6 +21,9 @@ import {
     PackageCheck,
     Search,
     Camera,
+    Sun,
+    SunMedium,
+    X,
 } from 'lucide-react';
 
 interface LaneConfig {
@@ -38,10 +42,22 @@ const LANES: LaneConfig[] = [
 ];
 
 const LOCAL_TIMERS_KEY = 'rinset_active_drum_timers';
+const DONE_TAGS_KEY = 'rinset_done_tags';
+const GLARE_MODE_KEY = 'rinset_glare_mode';
 
 export function LiveBoardView() {
     const storeId = useAuthStore((state) => state.storeId);
     const authStoreName = useAuthStore((state) => state.storeName);
+    const user = useAuthStore((state) => state.user);
+    const rawRole = useAuthStore((state) => (state as any).role || state.user?.role);
+    const isUnlocked = useAuthStore((state) => (state as any).isUnlocked);
+
+    // OWNER VERIFICATION: Strictly 'owner' or unlocked PIN session
+    const isOwner =
+        (rawRole as string) === 'owner' ||
+        ((user as any)?.role as string) === 'owner' ||
+        Boolean(isUnlocked);
+
     const { baskets, storeName: hookStoreName, updateBasketStatus, refreshOrders } = useLiveOrders();
 
     const storeName = authStoreName || hookStoreName || 'Rinset Laundry';
@@ -49,6 +65,51 @@ export function LiveBoardView() {
     const [searchQuery, setSearchQuery] = useState<string>('');
     const [orderToSettle, setOrderToSettle] = useState<Order | null>(null);
     const [isScannerOpen, setIsScannerOpen] = useState<boolean>(false);
+    const [isGlareMode, setIsGlareMode] = useState<boolean>(false);
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            try {
+                const saved = localStorage.getItem(GLARE_MODE_KEY);
+                if (saved) setIsGlareMode(saved === 'true');
+            } catch {}
+        }
+    }, []);
+
+    const toggleGlareMode = () => {
+        setIsGlareMode((prev) => {
+            const next = !prev;
+            if (typeof window !== 'undefined') {
+                localStorage.setItem(GLARE_MODE_KEY, String(next));
+            }
+            return next;
+        });
+    };
+
+    const handleBarcodeGunScan = useCallback(
+        (code: string) => {
+            const clean = code.trim().toUpperCase();
+            setSearchQuery(clean);
+
+            const match = baskets.find(
+                (b) =>
+                    (b.basket_tag?.toUpperCase() === clean || b.order?.order_number?.toUpperCase() === clean) &&
+                    b.status === 'ready_for_pickup' &&
+                    b.order &&
+                    b.order.payment_status !== 'paid'
+            );
+
+            if (match?.order) {
+                setOrderToSettle(match.order);
+            }
+        },
+        [baskets]
+    );
+
+    useBarcodeScanner({
+        onScan: handleBarcodeGunScan,
+        enabled: true,
+    });
 
     const [assignTarget, setAssignTarget] = useState<{
         basket: OrderBasket;
@@ -72,9 +133,38 @@ export function LiveBoardView() {
         return matchesTag || matchesNum || matchesCustomer || matchesMachine || matchesLocation;
     });
 
+    // Fold & Store: Auto-clears dryer timers when laundry moves to shelf/rack
     const handleConfirmStorage = async (location: string) => {
         if (!storageTarget) return;
         const supabase = createClient();
+        const cleanTag = String(storageTarget.basket_tag || '').toUpperCase();
+
+        // Immediately remove active drum timer and completion badge for this basket
+        if (typeof window !== 'undefined') {
+            try {
+                const savedTimers = localStorage.getItem(LOCAL_TIMERS_KEY);
+                if (savedTimers) {
+                    const timers = JSON.parse(savedTimers);
+                    let changed = false;
+                    Object.keys(timers).forEach((drum) => {
+                        if (timers[drum]?.basket_tag?.toUpperCase() === cleanTag) {
+                            delete timers[drum];
+                            changed = true;
+                        }
+                    });
+                    if (changed) localStorage.setItem(LOCAL_TIMERS_KEY, JSON.stringify(timers));
+                }
+
+                const savedDone = localStorage.getItem(DONE_TAGS_KEY);
+                if (savedDone) {
+                    const doneTags = JSON.parse(savedDone);
+                    if (doneTags[cleanTag]) {
+                        delete doneTags[cleanTag];
+                        localStorage.setItem(DONE_TAGS_KEY, JSON.stringify(doneTags));
+                    }
+                }
+            } catch {}
+        }
 
         let query = supabase
             .from('orders')
@@ -93,10 +183,11 @@ export function LiveBoardView() {
         await updateBasketStatus(storageTarget.id, storageTarget.order_id, 'ready_for_pickup', null);
 
         setStorageTarget(null);
+        window.dispatchEvent(new CustomEvent('rinset:timers-updated'));
+        window.dispatchEvent(new CustomEvent('rinset:order-updated'));
         refreshOrders();
     };
 
-    // Automatically start cycle timer when a machine drum is appointed
     const handleAssignMachineAndStartTimer = async (
         basketId: string,
         orderId: string,
@@ -111,12 +202,10 @@ export function LiveBoardView() {
         const endsAt = new Date(now.getTime() + durationMinutes * 60 * 1000);
         const cleanBasketTag = assignTarget?.basket?.basket_tag || '';
 
-        // 1. Sync timer state into local storage for immediate cross-component sync
         try {
             const saved = localStorage.getItem(LOCAL_TIMERS_KEY);
             const timers = saved ? JSON.parse(saved) : {};
 
-            // If moving from another drum, clear previous assignment
             Object.keys(timers).forEach((k) => {
                 if (timers[k]?.basket_tag?.toUpperCase() === cleanBasketTag.toUpperCase()) {
                     delete timers[k];
@@ -133,9 +222,7 @@ export function LiveBoardView() {
             };
 
             localStorage.setItem(LOCAL_TIMERS_KEY, JSON.stringify(timers));
-        } catch {
-            // Ignored
-        }
+        } catch {}
 
         setAssignTarget(null);
         window.dispatchEvent(new CustomEvent('rinset:timers-updated'));
@@ -144,38 +231,83 @@ export function LiveBoardView() {
     };
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
+        <div
+            className={`min-h-screen text-slate-100 flex flex-col font-sans select-none transition-colors duration-200 ${
+                isGlareMode ? 'bg-black' : 'bg-slate-950'
+            }`}
+        >
             <Navbar storeName={storeName} />
 
-            <MachineStatusOverview baskets={baskets} />
+            {/* MACHINE STATUS OVERVIEW STRIP: RESTRICTED TO OWNER ONLY */}
+            {isOwner && (
+                <MachineStatusOverview baskets={baskets} isGlareMode={isGlareMode} />
+            )}
 
-            <div className="p-4 border-b border-slate-800 bg-slate-900/40 flex flex-col sm:flex-row justify-between items-center gap-3 flex-shrink-0">
-                <div className="flex w-full sm:w-80 gap-2">
-                    <div className="relative flex-1">
-                        <Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
+            {/* Control Strip */}
+            <div
+                className={`p-3 sm:p-4 border-b flex flex-col sm:flex-row justify-between items-center gap-3 flex-shrink-0 transition-colors ${
+                    isGlareMode
+                        ? 'bg-black border-slate-700'
+                        : 'bg-slate-900/60 border-slate-800'
+                }`}
+            >
+                <div className="flex w-full sm:w-96 gap-2">
+                    {/* SEARCH BAR WITH UNCLIPPED ICON PADDING */}
+                    <div className="relative flex-1 flex items-center">
+                        <div className="absolute left-3.5 flex items-center pointer-events-none text-slate-400">
+                            <Search className="w-4 h-4 stroke-[2.5]" />
+                        </div>
                         <input
                             type="text"
-                            placeholder="Search basket, ticket #, shelf location..."
+                            placeholder="Search / Scan barcode gun..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:border-sky-500 focus:outline-none"
+                            className={`w-full min-h-[48px] h-12 rounded-2xl pl-11 pr-10 text-xs sm:text-sm font-semibold text-white placeholder-slate-500 focus:outline-none transition ${
+                                isGlareMode
+                                    ? 'bg-slate-900 border-2 border-slate-700 focus:border-sky-400'
+                                    : 'bg-slate-900/90 border border-slate-800 focus:border-sky-500'
+                            }`}
                         />
+                        {searchQuery && (
+                            <button
+                                type="button"
+                                onClick={() => setSearchQuery('')}
+                                className="absolute right-3 w-5 h-5 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition"
+                            >
+                                <X className="w-3 h-3" />
+                            </button>
+                        )}
                     </div>
+
                     <button
+                        type="button"
                         onClick={() => setIsScannerOpen(true)}
-                        className="px-3.5 bg-sky-500 hover:bg-sky-400 active:bg-sky-600 text-slate-950 rounded-xl flex items-center justify-center transition shadow-sm"
-                        title="Scan Basket QR Code"
+                        className="min-h-[48px] h-12 px-4 bg-sky-500 hover:bg-sky-400 active:bg-sky-600 active:scale-95 text-slate-950 rounded-2xl flex items-center justify-center transition shadow-md"
+                        title="Scan Basket QR Code via Tablet Camera"
                     >
-                        <Camera className="w-4 h-4 stroke-[2.2]" />
+                        <Camera className="w-5 h-5 stroke-[2.5]" />
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={toggleGlareMode}
+                        className={`min-h-[48px] h-12 px-3.5 rounded-2xl border flex items-center justify-center transition active:scale-95 ${
+                            isGlareMode
+                                ? 'bg-amber-400 text-slate-950 border-amber-300 font-black shadow-lg'
+                                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                        }`}
+                        title="Toggle Tropical Sunlight Glare Mode"
+                    >
+                        {isGlareMode ? <Sun className="w-5 h-5 fill-current" /> : <SunMedium className="w-5 h-5" />}
                     </button>
                 </div>
 
-                <div className="text-xs text-slate-400 flex items-center space-x-4">
+                <div className="text-xs text-slate-300 flex items-center space-x-4 font-mono font-bold">
           <span>
-            Active Baskets: <strong className="text-white">{baskets.filter((b) => b.status !== 'claimed').length}</strong>
+            Active: <strong className="text-white text-sm">{baskets.filter((b) => b.status !== 'claimed').length}</strong>
           </span>
                     <span>
-            Ready for Pickup: <strong className="text-emerald-400">{baskets.filter((b) => b.status === 'ready_for_pickup').length}</strong>
+            Ready for Pickup: <strong className="text-emerald-400 text-sm">{baskets.filter((b) => b.status === 'ready_for_pickup').length}</strong>
           </span>
                 </div>
             </div>
@@ -200,14 +332,16 @@ export function LiveBoardView() {
                 ))}
             </div>
 
-            {/* App Footer */}
-            <footer className="py-5 pb-24 lg:pb-6 text-center border-t border-slate-800/80 mt-auto select-none bg-slate-950 flex-shrink-0">
-                <p className="text-xs text-slate-400 font-mono tracking-wider">
+            <footer
+                className={`py-5 pb-24 lg:pb-6 text-center border-t mt-auto select-none flex-shrink-0 transition-colors ${
+                    isGlareMode ? 'bg-black border-slate-800' : 'bg-slate-950 border-slate-800/80'
+                }`}
+            >
+                <p className="text-xs text-slate-500 font-mono tracking-wider">
                     Rinset 2026 by tijnara
                 </p>
             </footer>
 
-            {/* Machine Drum Selection Modal */}
             <AssignMachineModal
                 basket={assignTarget?.basket || null}
                 targetStatus={assignTarget?.targetStatus || null}
@@ -217,7 +351,6 @@ export function LiveBoardView() {
                 onConfirm={handleAssignMachineAndStartTimer}
             />
 
-            {/* Storage Shelf / Cubby Modal */}
             <AssignStorageModal
                 basket={storageTarget}
                 isOpen={Boolean(storageTarget)}

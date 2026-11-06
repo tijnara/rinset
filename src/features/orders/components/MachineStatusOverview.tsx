@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { OrderBasket } from '@/types/database';
 import { createClient } from '@/lib/supabase/client';
+import { sound } from '@/lib/sound';
 import { Waves, Wind, RotateCcw } from 'lucide-react';
 
 export const WASHERS = ['W-01', 'W-02', 'W-03', 'W-04'] as const;
@@ -13,20 +14,21 @@ const DONE_TAGS_KEY = 'rinset_done_tags';
 
 interface MachineStatusOverviewProps {
     baskets: OrderBasket[];
+    isGlareMode?: boolean;
 }
 
-export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
+export function MachineStatusOverview({ baskets, isGlareMode = false }: MachineStatusOverviewProps) {
     const [, setTick] = useState(0);
     const [localTimers, setLocalTimers] = useState<Record<string, any>>({});
     const [doneTags, setDoneTags] = useState<Record<string, any>>({});
+    const chimedDrumsRef = useRef<Set<string>>(new Set());
 
-    // Per-second tick to update live countdown timer
+    // 1-second interval to update live countdown timer
     useEffect(() => {
         const timer = setInterval(() => setTick((t) => t + 1), 1000);
         return () => clearInterval(timer);
     }, []);
 
-    // Sync timers and auto-purge phantom tags (like B-187) not found in active baskets
     const syncLocalState = () => {
         if (typeof window === 'undefined') return;
         try {
@@ -36,24 +38,47 @@ export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
             const parsedTimers = savedTimers ? JSON.parse(savedTimers) : {};
             const parsedDone = savedDone ? JSON.parse(savedDone) : {};
 
-            // If active baskets are loaded, remove orphan timers from cache
-            if (baskets && baskets.length > 0) {
-                const activeTagSet = new Set(
-                    baskets.map((b) => String(b.basket_tag || b.order?.order_number || '').toUpperCase())
-                );
+            // Stage-specific active tag sets:
+            // Washers can only hold baskets in 'washing'
+            const activeWashingTags = new Set(
+                baskets
+                    .filter((b) => String(b.status).toLowerCase() === 'washing')
+                    .map((b) => String(b.basket_tag || b.order?.order_number || '').toUpperCase())
+            );
 
-                let timersPruned = false;
-                Object.keys(parsedTimers).forEach((drumKey) => {
-                    const storedTag = String(parsedTimers[drumKey]?.basket_tag || '').toUpperCase();
-                    if (storedTag && !activeTagSet.has(storedTag)) {
-                        delete parsedTimers[drumKey];
-                        timersPruned = true;
-                    }
-                });
+            // Dryers can only hold baskets in 'drying'
+            const activeDryingTags = new Set(
+                baskets
+                    .filter((b) => String(b.status).toLowerCase() === 'drying')
+                    .map((b) => String(b.basket_tag || b.order?.order_number || '').toUpperCase())
+            );
 
-                if (timersPruned) {
-                    localStorage.setItem(LOCAL_TIMERS_KEY, JSON.stringify(parsedTimers));
+            let timersPruned = false;
+            Object.keys(parsedTimers).forEach((drumKey) => {
+                const isWasher = drumKey.toUpperCase().startsWith('W');
+                const isDryer = drumKey.toUpperCase().startsWith('D');
+                const tag = String(parsedTimers[drumKey]?.basket_tag || '').toUpperCase();
+
+                if (!tag) {
+                    delete parsedTimers[drumKey];
+                    timersPruned = true;
+                    return;
                 }
+
+                // If basket moved past washing, vacate washer drum
+                if (isWasher && !activeWashingTags.has(tag)) {
+                    delete parsedTimers[drumKey];
+                    timersPruned = true;
+                }
+                // If basket moved past drying (e.g. to ready_for_pickup), vacate dryer drum
+                else if (isDryer && !activeDryingTags.has(tag)) {
+                    delete parsedTimers[drumKey];
+                    timersPruned = true;
+                }
+            });
+
+            if (timersPruned) {
+                localStorage.setItem(LOCAL_TIMERS_KEY, JSON.stringify(parsedTimers));
             }
 
             setLocalTimers(parsedTimers);
@@ -72,25 +97,40 @@ export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
         };
     }, [baskets]);
 
-    // Compute status and countdown for each drum
     const getDrumState = (drumName: string, type: 'washer' | 'dryer') => {
         const isWasher = type === 'washer';
         const cleanTarget = drumName.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-        const activeTagSet = new Set(
-            baskets.map((b) => String(b.basket_tag || b.order?.order_number || '').toUpperCase())
+
+        // Stage validation sets:
+        const activeWashingTags = new Set(
+            baskets
+                .filter((b) => String(b.status).toLowerCase() === 'washing')
+                .map((b) => String(b.basket_tag || b.order?.order_number || '').toUpperCase())
         );
 
-        // 1. Check local timers (only if the tag exists in active baskets)
+        const activeDryingTags = new Set(
+            baskets
+                .filter((b) => String(b.status).toLowerCase() === 'drying')
+                .map((b) => String(b.basket_tag || b.order?.order_number || '').toUpperCase())
+        );
+
+        // 1. Check local timers (only if the tag is still actively in this stage)
         const timerData = localTimers[drumName];
         if (timerData && timerData.ends_at) {
             const tagUpper = String(timerData.basket_tag || '').toUpperCase();
+            const isValidForStage = isWasher ? activeWashingTags.has(tagUpper) : activeDryingTags.has(tagUpper);
 
-            if (baskets.length === 0 || activeTagSet.has(tagUpper)) {
+            if (isValidForStage) {
                 const diff = new Date(timerData.ends_at).getTime() - Date.now();
                 const isDone = diff <= 0;
                 const totalSecs = Math.max(0, Math.floor(diff / 1000));
                 const mins = Math.floor(totalSecs / 60);
                 const secs = totalSecs % 60;
+
+                if (isDone && !chimedDrumsRef.current.has(drumName)) {
+                    chimedDrumsRef.current.add(drumName);
+                    sound.playCycleCompleteChime();
+                }
 
                 return {
                     drum: drumName,
@@ -103,7 +143,7 @@ export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
             }
         }
 
-        // 2. Check active baskets from props
+        // 2. Check active baskets from database
         const matchingBasket = baskets.find((b) => {
             const status = String(b.status || '').toLowerCase();
             const matchesType = isWasher
@@ -128,6 +168,11 @@ export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
             const mins = Math.floor(totalSecs / 60);
             const secs = totalSecs % 60;
 
+            if (isDone && !chimedDrumsRef.current.has(drumName)) {
+                chimedDrumsRef.current.add(drumName);
+                sound.playCycleCompleteChime();
+            }
+
             return {
                 drum: drumName,
                 status: 'occupied',
@@ -139,6 +184,8 @@ export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
             };
         }
 
+        chimedDrumsRef.current.delete(drumName);
+
         return {
             drum: drumName,
             status: 'idle',
@@ -149,12 +196,13 @@ export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
         };
     };
 
-    // Quick Clear Drum action right from the Live Board header
     const handleClearDrum = async (drumName: string, type: 'washer' | 'dryer', tag: string | null) => {
         if (!tag) return;
         const cleanTag = tag.toUpperCase();
         const stage = type === 'washer' ? 'wash_done' : 'dry_done';
         const label = type === 'washer' ? 'WASH DONE' : 'DRY DONE';
+
+        chimedDrumsRef.current.delete(drumName);
 
         try {
             const updatedDone = {
@@ -193,11 +241,17 @@ export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
     };
 
     return (
-        <div className="border-b border-slate-800 bg-slate-900/60 p-3 flex flex-col md:flex-row items-center justify-between gap-3 flex-shrink-0 select-none">
+        <div
+            className={`border-b p-3 flex flex-col md:flex-row items-center justify-between gap-3 flex-shrink-0 select-none transition-colors ${
+                isGlareMode
+                    ? 'bg-black border-slate-700'
+                    : 'bg-slate-900/80 border-slate-800'
+            }`}
+        >
             {/* WASHERS STRIP */}
             <div className="flex items-center space-x-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
-                <div className="flex items-center space-x-1.5 text-xs font-bold uppercase tracking-wider text-sky-400 pl-1 pr-2 border-r border-slate-800">
-                    <Waves className="w-4 h-4 text-sky-400" />
+                <div className="flex items-center space-x-1.5 text-xs font-black uppercase tracking-wider text-sky-400 pl-1 pr-2.5 border-r border-slate-800">
+                    <Waves className="w-4 h-4 text-sky-400 stroke-[2.5]" />
                     <span>Washers</span>
                 </div>
 
@@ -209,18 +263,24 @@ export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
                         return (
                             <div
                                 key={drum}
-                                className={`relative px-3 py-1.5 rounded-xl border flex flex-col justify-center min-w-[96px] transition group ${
+                                className={`relative px-3 py-2 rounded-xl border flex flex-col justify-center min-w-[104px] min-h-[52px] transition ${
                                     isOccupied
                                         ? bay.isDone
-                                            ? 'bg-rose-500/15 border-rose-500/50 shadow-sm'
-                                            : 'bg-sky-500/15 border-sky-500/40 shadow-sm'
-                                        : 'bg-slate-900/40 border-slate-800 opacity-60'
+                                            ? isGlareMode
+                                                ? 'bg-rose-950 border-rose-500 shadow-md animate-pulse'
+                                                : 'bg-rose-500/20 border-rose-500 shadow-md animate-pulse'
+                                            : isGlareMode
+                                                ? 'bg-slate-900 border-sky-400 shadow-md'
+                                                : 'bg-sky-500/15 border-sky-500/40 shadow-sm'
+                                        : isGlareMode
+                                            ? 'bg-black border-slate-800'
+                                            : 'bg-slate-900/40 border-slate-800 opacity-60'
                                 }`}
                             >
                                 <div className="flex items-center justify-between gap-1">
-                                    <div className="flex items-center space-x-1">
+                                    <div className="flex items-center space-x-1.5">
                     <span
-                        className={`w-1.5 h-1.5 rounded-full ${
+                        className={`w-2 h-2 rounded-full ${
                             isOccupied
                                 ? bay.isDone
                                     ? 'bg-rose-400 animate-ping'
@@ -228,29 +288,29 @@ export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
                                 : 'bg-emerald-400'
                         }`}
                     />
-                                        <span className="font-mono font-bold text-xs text-white">{drum}</span>
+                                        <span className="font-mono font-black text-xs text-white">{drum}</span>
                                     </div>
 
                                     {isOccupied && (
                                         <button
                                             type="button"
                                             onClick={() => handleClearDrum(drum, 'washer', bay.tag)}
-                                            className="opacity-80 hover:opacity-100 p-0.5 rounded bg-slate-800 hover:bg-rose-500 text-slate-300 hover:text-white transition"
+                                            className="min-h-[34px] min-w-[34px] p-1.5 rounded-lg bg-slate-800 hover:bg-rose-600 active:scale-95 text-slate-300 hover:text-white transition flex items-center justify-center"
                                             title="Clear Drum & Mark WASH DONE"
                                         >
-                                            <RotateCcw className="w-2.5 h-2.5" />
+                                            <RotateCcw className="w-3.5 h-3.5 stroke-[2.5]" />
                                         </button>
                                     )}
                                 </div>
 
-                                <div className="mt-0.5 flex items-center justify-between">
+                                <div className="mt-1 flex items-center justify-between">
                                     {isOccupied ? (
                                         <>
-                      <span className="font-mono text-[11px] font-black text-sky-300 truncate max-w-[50px]">
+                      <span className="font-mono text-xs font-black text-sky-300 truncate max-w-[55px]">
                         {bay.tag}
                       </span>
                                             <span
-                                                className={`font-mono text-[10px] font-bold ${
+                                                className={`font-mono text-[11px] font-black ${
                                                     bay.isDone ? 'text-rose-400 animate-pulse' : 'text-sky-400'
                                                 }`}
                                             >
@@ -258,7 +318,7 @@ export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
                       </span>
                                         </>
                                     ) : (
-                                        <span className="text-[10px] text-slate-500 font-mono">Idle</span>
+                                        <span className="text-[11px] text-slate-500 font-mono font-semibold">Idle</span>
                                     )}
                                 </div>
                             </div>
@@ -269,8 +329,8 @@ export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
 
             {/* DRYERS STRIP */}
             <div className="flex items-center space-x-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
-                <div className="flex items-center space-x-1.5 text-xs font-bold uppercase tracking-wider text-amber-400 pl-1 pr-2 border-r border-slate-800">
-                    <Wind className="w-4 h-4 text-amber-400" />
+                <div className="flex items-center space-x-1.5 text-xs font-black uppercase tracking-wider text-amber-400 pl-1 pr-2.5 border-r border-slate-800">
+                    <Wind className="w-4 h-4 text-amber-400 stroke-[2.5]" />
                     <span>Dryers</span>
                 </div>
 
@@ -282,18 +342,24 @@ export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
                         return (
                             <div
                                 key={drum}
-                                className={`relative px-3 py-1.5 rounded-xl border flex flex-col justify-center min-w-[96px] transition group ${
+                                className={`relative px-3 py-2 rounded-xl border flex flex-col justify-center min-w-[104px] min-h-[52px] transition ${
                                     isOccupied
                                         ? bay.isDone
-                                            ? 'bg-rose-500/15 border-rose-500/50 shadow-sm'
-                                            : 'bg-amber-500/15 border-amber-500/40 shadow-sm'
-                                        : 'bg-slate-900/40 border-slate-800 opacity-60'
+                                            ? isGlareMode
+                                                ? 'bg-rose-950 border-rose-500 shadow-md animate-pulse'
+                                                : 'bg-rose-500/20 border-rose-500 shadow-md animate-pulse'
+                                            : isGlareMode
+                                                ? 'bg-slate-900 border-amber-400 shadow-md'
+                                                : 'bg-amber-500/15 border-amber-500/40 shadow-sm'
+                                        : isGlareMode
+                                            ? 'bg-black border-slate-800'
+                                            : 'bg-slate-900/40 border-slate-800 opacity-60'
                                 }`}
                             >
                                 <div className="flex items-center justify-between gap-1">
-                                    <div className="flex items-center space-x-1">
+                                    <div className="flex items-center space-x-1.5">
                     <span
-                        className={`w-1.5 h-1.5 rounded-full ${
+                        className={`w-2 h-2 rounded-full ${
                             isOccupied
                                 ? bay.isDone
                                     ? 'bg-rose-400 animate-ping'
@@ -301,29 +367,29 @@ export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
                                 : 'bg-emerald-400'
                         }`}
                     />
-                                        <span className="font-mono font-bold text-xs text-white">{drum}</span>
+                                        <span className="font-mono font-black text-xs text-white">{drum}</span>
                                     </div>
 
                                     {isOccupied && (
                                         <button
                                             type="button"
                                             onClick={() => handleClearDrum(drum, 'dryer', bay.tag)}
-                                            className="opacity-80 hover:opacity-100 p-0.5 rounded bg-slate-800 hover:bg-rose-500 text-slate-300 hover:text-white transition"
+                                            className="min-h-[34px] min-w-[34px] p-1.5 rounded-lg bg-slate-800 hover:bg-rose-600 active:scale-95 text-slate-300 hover:text-white transition flex items-center justify-center"
                                             title="Clear Drum & Mark DRY DONE"
                                         >
-                                            <RotateCcw className="w-2.5 h-2.5" />
+                                            <RotateCcw className="w-3.5 h-3.5 stroke-[2.5]" />
                                         </button>
                                     )}
                                 </div>
 
-                                <div className="mt-0.5 flex items-center justify-between">
+                                <div className="mt-1 flex items-center justify-between">
                                     {isOccupied ? (
                                         <>
-                      <span className="font-mono text-[11px] font-black text-amber-300 truncate max-w-[50px]">
+                      <span className="font-mono text-xs font-black text-amber-300 truncate max-w-[55px]">
                         {bay.tag}
                       </span>
                                             <span
-                                                className={`font-mono text-[10px] font-bold ${
+                                                className={`font-mono text-[11px] font-black ${
                                                     bay.isDone ? 'text-rose-400 animate-pulse' : 'text-amber-400'
                                                 }`}
                                             >
@@ -331,7 +397,7 @@ export function MachineStatusOverview({ baskets }: MachineStatusOverviewProps) {
                       </span>
                                         </>
                                     ) : (
-                                        <span className="text-[10px] text-slate-500 font-mono">Idle</span>
+                                        <span className="text-[11px] text-slate-500 font-mono font-semibold">Idle</span>
                                     )}
                                 </div>
                             </div>

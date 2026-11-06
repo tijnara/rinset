@@ -53,6 +53,15 @@ interface MachineBayModalProps {
 export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
     const router = useRouter();
     const storeId = useAuthStore((state) => state.storeId);
+    const user = useAuthStore((state) => state.user);
+    const rawRole = useAuthStore((state) => (state as any).role || state.user?.role);
+    const isUnlocked = useAuthStore((state) => (state as any).isUnlocked);
+
+    // OWNER VERIFICATION: Restricted to owner or unlocked PIN session
+    const isOwner =
+        (rawRole as string) === 'owner' ||
+        ((user as any)?.role as string) === 'owner' ||
+        Boolean(isUnlocked);
 
     const [activeBaskets, setActiveBaskets] = useState<any[]>([]);
     const [activeBasketInputs, setActiveBasketInputs] = useState<Record<string, string>>({});
@@ -115,7 +124,6 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
         }
     };
 
-    // Sync active orders from Supabase order_baskets
     const syncWithLiveOrders = useCallback(async () => {
         const supabase = createClient();
         try {
@@ -147,19 +155,32 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
     }, []);
 
     useEffect(() => {
-        if (isOpen) syncWithLiveOrders();
-    }, [isOpen, syncWithLiveOrders]);
+        if (isOpen && isOwner) syncWithLiveOrders();
+    }, [isOpen, isOwner, syncWithLiveOrders]);
 
-    // Compute machine bay state & PURGE GHOST TAGS
+    const getTimeLeft = (endsAtStr: string | null, totalMinutes: number) => {
+        if (!endsAtStr) return { minutes: 0, seconds: 0, isDone: true, percent: 100 };
+        const diff = new Date(endsAtStr).getTime() - Date.now();
+        if (diff <= 0) return { minutes: 0, seconds: 0, isDone: true, percent: 100 };
+
+        const totalSeconds = Math.floor(diff / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+
+        const totalSecsDuration = Math.max(1, (totalMinutes || 35) * 60);
+        const elapsed = totalSecsDuration - totalSeconds;
+        const percent = Math.min(100, Math.max(0, Math.round((elapsed / totalSecsDuration) * 100)));
+
+        return { minutes, seconds, isDone: false, percent };
+    };
+
     const machines = useMemo<Machine[]>(() => {
         const activeDbTags = new Set(activeBaskets.map((b) => b.basket_tag.toUpperCase()));
         const validLocalTimers = { ...localDrumAssignments };
         let timersNeedPruning = false;
 
-        // Prune ghost timers from localStorage
         Object.keys(validLocalTimers).forEach((drumKey) => {
             const storedTag = (validLocalTimers[drumKey]?.basket_tag || '').toUpperCase();
-            // If tag is not in active baskets, remove it immediately
             if (storedTag && activeBaskets.length > 0 && !activeDbTags.has(storedTag)) {
                 delete validLocalTimers[drumKey];
                 timersNeedPruning = true;
@@ -175,7 +196,6 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
             const targetClean = drum.name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
             const currentConfiguredDuration = bayDurations[drum.name] || drum.defaultDuration;
 
-            // 1. Check valid local timer (only if matching a real active basket)
             const localAssignment = validLocalTimers[drum.name];
             if (localAssignment && localAssignment.ends_at) {
                 const diff = new Date(localAssignment.ends_at).getTime() - Date.now();
@@ -198,7 +218,6 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                 }
             }
 
-            // 2. Check active baskets from database
             const assignedBasket = activeBaskets.find((b) => {
                 const basketStatus = String(b.status || '').toLowerCase();
                 const matchesType = isWasher
@@ -268,14 +287,19 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
 
     const dryerSuggestions = useMemo(() => {
         const list: any[] = [];
+
         machines
-            .filter((m) => m.type === 'washer' && m.status === 'running' && m.current_basket_tag)
+            .filter((m) => {
+                if (m.type !== 'washer' || !m.current_basket_tag) return false;
+                const timer = getTimeLeft(m.ends_at, m.duration_minutes);
+                return timer.isDone;
+            })
             .forEach((m) => {
                 list.push({
                     id: m.order_id || m.name,
                     tag: m.current_basket_tag!,
                     customer: m.customer_name || 'Customer',
-                    source: `from ${m.name}`,
+                    source: `done in ${m.name}`,
                 });
             });
 
@@ -284,12 +308,18 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
             const tag = String(b.basket_tag).toUpperCase();
             const isWashing = status === 'washing' || status === 'wash' || status === 'in_wash';
 
-            if (isWashing && !list.some((item) => item.tag === tag)) {
+            let isMarkedDone = false;
+            try {
+                const doneMap = JSON.parse(localStorage.getItem(DONE_TAGS_KEY) || '{}');
+                isMarkedDone = doneMap[tag]?.stage === 'wash_done';
+            } catch {}
+
+            if (isWashing && isMarkedDone && !list.some((item) => item.tag === tag)) {
                 list.push({
                     id: b.id,
                     tag,
                     customer: b.customer_name || 'Customer',
-                    source: b.assigned_machine ? `from ${b.assigned_machine}` : 'Washing',
+                    source: b.assigned_machine ? `done in ${b.assigned_machine}` : 'Wash Done',
                 });
             }
         });
@@ -297,12 +327,27 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
         return list;
     }, [machines, activeBaskets]);
 
-    if (!isOpen) return null;
+    if (!isOpen || !isOwner) return null;
 
-    // Appoint tag and auto-start cycle
     const handleAppointAndStart = async (machine: Machine, appointedTag: string) => {
         const cleanTag = appointedTag.trim().toUpperCase();
         if (!cleanTag) return;
+
+        if (machine.type === 'dryer') {
+            const runningWasher = machines.find(
+                (m) => m.type === 'washer' && m.current_basket_tag?.toUpperCase() === cleanTag
+            );
+
+            if (runningWasher) {
+                const timer = getTimeLeft(runningWasher.ends_at, runningWasher.duration_minutes);
+                if (!timer.isDone) {
+                    alert(
+                        `Cannot start drying: Basket ${cleanTag} is still washing in ${runningWasher.name} (${timer.minutes}m ${timer.seconds}s remaining). Wash cycle must complete first.`
+                    );
+                    return;
+                }
+            }
+        }
 
         const duration = bayDurations[machine.name] || machine.duration_minutes || (machine.type === 'washer' ? 35 : 45);
         const now = new Date();
@@ -333,7 +378,6 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
 
         setActiveBasketInputs((prev) => ({ ...prev, [machine.name]: '' }));
 
-        // Update Supabase order_baskets directly
         const supabase = createClient();
         try {
             await supabase
@@ -355,13 +399,11 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
         router.refresh();
     };
 
-    // CLEAR DRUM: Frees bay, unsets machine assignment in DB, and clears ghost data
     const handleClearMachine = async (machine: Machine) => {
         const cleanTag = machine.current_basket_tag ? machine.current_basket_tag.toUpperCase() : null;
         const stage = machine.type === 'washer' ? 'wash_done' : 'dry_done';
         const label = machine.type === 'washer' ? 'WASH DONE' : 'DRY DONE';
 
-        // 1. Mark done tag in localStorage
         if (cleanTag) {
             try {
                 const savedDone = localStorage.getItem(DONE_TAGS_KEY);
@@ -376,7 +418,6 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
             } catch {}
         }
 
-        // 2. Clear from local state immediately
         const newLocal = { ...localDrumAssignments };
         delete newLocal[machine.name];
         setLocalDrumAssignments(newLocal);
@@ -385,7 +426,6 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
             window.dispatchEvent(new CustomEvent('rinset:timers-updated'));
         }
 
-        // Immediately remove machine assignment in React state
         setActiveBaskets((prev) =>
             prev.map((b) =>
                 b.assigned_machine === machine.name || (cleanTag && b.basket_tag === cleanTag)
@@ -394,7 +434,6 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
             )
         );
 
-        // 3. Update Supabase order_baskets safely (no invalid tables/columns)
         const supabase = createClient();
         try {
             await supabase
@@ -419,22 +458,6 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
         router.refresh();
     };
 
-    const getTimeLeft = (endsAtStr: string | null, totalMinutes: number) => {
-        if (!endsAtStr) return { minutes: 0, seconds: 0, isDone: true, percent: 100 };
-        const diff = new Date(endsAtStr).getTime() - Date.now();
-        if (diff <= 0) return { minutes: 0, seconds: 0, isDone: true, percent: 100 };
-
-        const totalSeconds = Math.floor(diff / 1000);
-        const minutes = Math.floor(totalSeconds / 60);
-        const seconds = totalSeconds % 60;
-
-        const totalSecsDuration = Math.max(1, (totalMinutes || 35) * 60);
-        const elapsed = totalSecsDuration - totalSeconds;
-        const percent = Math.min(100, Math.max(0, Math.round((elapsed / totalSecsDuration) * 100)));
-
-        return { minutes, seconds, isDone: false, percent };
-    };
-
     const washers = machines.filter((m) => m.type === 'washer');
     const dryers = machines.filter((m) => m.type === 'dryer');
 
@@ -457,19 +480,19 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                     <button
                         type="button"
                         onClick={onClose}
-                        className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition"
+                        className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition active:scale-95"
                     >
                         <X className="w-4 h-4" />
                     </button>
                 </div>
 
                 {/* Content Body */}
-                <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
                     {/* Washers Section */}
                     <div className="space-y-3">
                         <div className="flex items-center justify-between">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-sky-400 flex items-center gap-1.5">
-                                <Waves className="w-3.5 h-3.5 text-sky-400" />
+                                <Waves className="w-4 h-4 text-sky-400 stroke-[2.5]" />
                                 Commercial Washers (Customizable Duration)
                             </h3>
                             <span className="text-[11px] text-slate-500">Default: 35 min standard cycle</span>
@@ -514,7 +537,6 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                         </span>
                                             </div>
 
-                                            {/* RUNNING COUNTDOWN TIMER DISPLAY */}
                                             {isRunning && (
                                                 <div className="py-2 space-y-1.5">
                                                     <div className="text-center">
@@ -537,19 +559,19 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                                                         />
                                                     </div>
 
-                                                    <div className="flex items-center justify-center gap-1.5 pt-1">
-                                                        <span className="text-[10px] text-slate-500 font-mono">Extend:</span>
+                                                    <div className="flex items-center justify-center gap-2 pt-2">
+                                                        <span className="text-xs text-slate-400 font-mono font-bold">Extend:</span>
                                                         <button
                                                             type="button"
                                                             onClick={() => handleExtendRunningTimer(m, 5)}
-                                                            className="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-sky-500 text-sky-300 text-[10px] font-mono font-bold rounded-md transition"
+                                                            className="min-h-[44px] px-3.5 bg-slate-900 hover:bg-slate-800 active:scale-95 border border-slate-700 hover:border-sky-500 text-sky-300 text-xs font-mono font-bold rounded-xl transition shadow-sm"
                                                         >
                                                             +5m
                                                         </button>
                                                         <button
                                                             type="button"
                                                             onClick={() => handleExtendRunningTimer(m, 10)}
-                                                            className="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-sky-500 text-sky-300 text-[10px] font-mono font-bold rounded-md transition"
+                                                            className="min-h-[44px] px-3.5 bg-slate-900 hover:bg-slate-800 active:scale-95 border border-slate-700 hover:border-sky-500 text-sky-300 text-xs font-mono font-bold rounded-xl transition shadow-sm"
                                                         >
                                                             +10m
                                                         </button>
@@ -569,28 +591,27 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                                             <button
                                                 type="button"
                                                 onClick={() => handleClearMachine(m)}
-                                                className="mt-3 w-full py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 text-xs font-bold rounded-xl flex items-center justify-center space-x-1.5 transition"
+                                                className="mt-3 w-full min-h-[48px] py-3 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 active:scale-98 text-slate-100 text-xs font-black rounded-xl flex items-center justify-center space-x-2 transition shadow-sm"
                                                 title="Unload drum and mark basket as WASH DONE"
                                             >
-                                                <RotateCcw className="w-3.5 h-3.5 text-sky-400" />
+                                                <RotateCcw className="w-4 h-4 text-sky-400 stroke-[2.5]" />
                                                 <span>Clear Drum (Wash Done)</span>
                                             </button>
                                         ) : (
-                                            <div className="mt-3 space-y-2">
-                                                {/* EDITABLE DURATION CONTROLS BEFORE START */}
-                                                <div className="p-2 bg-slate-900/80 rounded-xl border border-slate-800/80 space-y-1.5">
-                                                    <div className="flex items-center justify-between text-[10px]">
-                            <span className="text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1">
-                              <Clock className="w-3 h-3 text-sky-400" />
-                              Cycle Duration:
+                                            <div className="mt-3 space-y-2.5">
+                                                <div className="p-2.5 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2">
+                                                    <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                              <Clock className="w-3.5 h-3.5 text-sky-400" />
+                              Duration:
                             </span>
                                                         <div className="flex items-center gap-1 font-mono font-bold text-sky-300">
                                                             <button
                                                                 type="button"
                                                                 onClick={() => handleModifyDuration(m.name, configuredDuration - 5)}
-                                                                className="w-5 h-5 rounded bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-300"
+                                                                className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-200 active:scale-95"
                                                             >
-                                                                <Minus className="w-2.5 h-2.5" />
+                                                                <Minus className="w-3 h-3 stroke-[3]" />
                                                             </button>
                                                             <input
                                                                 type="number"
@@ -598,28 +619,28 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                                                                 max={120}
                                                                 value={configuredDuration}
                                                                 onChange={(e) => handleModifyDuration(m.name, parseInt(e.target.value) || 35)}
-                                                                className="w-9 text-center bg-slate-950 border border-slate-700 rounded py-0.5 text-xs text-white focus:outline-none focus:border-sky-500 font-mono font-bold"
+                                                                className="w-10 text-center bg-slate-950 border border-slate-700 rounded-lg py-1 text-xs text-white focus:outline-none focus:border-sky-500 font-mono font-bold"
                                                             />
-                                                            <span className="text-[10px] text-slate-400">m</span>
+                                                            <span className="text-xs text-slate-400">m</span>
                                                             <button
                                                                 type="button"
                                                                 onClick={() => handleModifyDuration(m.name, configuredDuration + 5)}
-                                                                className="w-5 h-5 rounded bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-300"
+                                                                className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-200 active:scale-95"
                                                             >
-                                                                <Plus className="w-2.5 h-2.5" />
+                                                                <Plus className="w-3 h-3 stroke-[3]" />
                                                             </button>
                                                         </div>
                                                     </div>
 
-                                                    <div className="flex items-center gap-1 justify-between">
+                                                    <div className="grid grid-cols-3 gap-1.5">
                                                         {[25, 35, 45].map((preset) => (
                                                             <button
                                                                 key={preset}
                                                                 type="button"
                                                                 onClick={() => handleModifyDuration(m.name, preset)}
-                                                                className={`flex-1 py-0.5 rounded text-[10px] font-mono font-bold border transition ${
+                                                                className={`min-h-[38px] py-1.5 rounded-lg text-xs font-mono font-bold border transition active:scale-95 ${
                                                                     configuredDuration === preset
-                                                                        ? 'bg-sky-500/20 border-sky-400 text-sky-300'
+                                                                        ? 'bg-sky-500/25 border-sky-400 text-sky-300'
                                                                         : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
                                                                 }`}
                                                             >
@@ -629,7 +650,6 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                                                     </div>
                                                 </div>
 
-                                                {/* One-Tap Suggestion Chips */}
                                                 <div className="space-y-1">
                           <span className="text-[10px] text-slate-400 font-semibold uppercase flex items-center gap-1">
                             <Bubbles className="w-3.5 h-3.5 text-sky-400" />
@@ -642,7 +662,7 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                                                                     key={sug.id}
                                                                     type="button"
                                                                     onClick={() => handleAppointAndStart(m, sug.tag)}
-                                                                    className="px-2 py-0.5 rounded-lg border text-[10px] font-mono font-bold transition flex items-center gap-1 bg-slate-900 border-slate-700 text-sky-300 hover:bg-sky-500 hover:text-slate-950 hover:border-sky-400 active:scale-95 shadow-sm"
+                                                                    className="px-2.5 py-1 rounded-lg border text-xs font-mono font-bold transition flex items-center gap-1 bg-slate-900 border-slate-700 text-sky-300 hover:bg-sky-500 hover:text-slate-950 hover:border-sky-400 active:scale-95 shadow-sm"
                                                                 >
                                                                     <span>+{sug.tag}</span>
                                                                 </button>
@@ -653,13 +673,12 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                                                     )}
                                                 </div>
 
-                                                {/* Manual Input Fallback */}
                                                 <form
                                                     onSubmit={(e) => {
                                                         e.preventDefault();
                                                         handleAppointAndStart(m, inputValue);
                                                     }}
-                                                    className="flex gap-1"
+                                                    className="flex gap-1.5"
                                                 >
                                                     <input
                                                         type="text"
@@ -671,14 +690,14 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                                                                 [m.name]: e.target.value,
                                                             }))
                                                         }
-                                                        className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 font-mono uppercase"
+                                                        className="flex-1 min-h-[44px] bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 font-mono uppercase"
                                                     />
                                                     <button
                                                         type="submit"
                                                         disabled={!inputValue.trim()}
-                                                        className="px-3 py-1 bg-sky-500 hover:bg-sky-400 disabled:opacity-40 text-slate-950 font-bold text-xs rounded-xl flex items-center justify-center transition shadow"
+                                                        className="min-h-[44px] px-4 bg-sky-500 hover:bg-sky-400 active:bg-sky-600 disabled:opacity-40 text-slate-950 font-bold text-xs rounded-xl flex items-center justify-center transition shadow active:scale-95"
                                                     >
-                                                        <Play className="w-3 h-3 fill-current" />
+                                                        <Play className="w-3.5 h-3.5 fill-current" />
                                                     </button>
                                                 </form>
                                             </div>
@@ -693,7 +712,7 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                     <div className="space-y-3 pt-4 border-t border-slate-800">
                         <div className="flex items-center justify-between">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-                                <Wind className="w-3.5 h-3.5 text-amber-400" />
+                                <Wind className="w-4 h-4 text-amber-400 stroke-[2.5]" />
                                 Commercial Dryers (Customizable Duration)
                             </h3>
                             <span className="text-[11px] text-slate-500">Default: 45 min standard cycle</span>
@@ -738,7 +757,6 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                         </span>
                                             </div>
 
-                                            {/* RUNNING COUNTDOWN TIMER DISPLAY */}
                                             {isRunning && (
                                                 <div className="py-2 space-y-1.5">
                                                     <div className="text-center">
@@ -761,19 +779,19 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                                                         />
                                                     </div>
 
-                                                    <div className="flex items-center justify-center gap-1.5 pt-1">
-                                                        <span className="text-[10px] text-slate-500 font-mono">Extend:</span>
+                                                    <div className="flex items-center justify-center gap-2 pt-2">
+                                                        <span className="text-xs text-slate-400 font-mono font-bold">Extend:</span>
                                                         <button
                                                             type="button"
                                                             onClick={() => handleExtendRunningTimer(m, 5)}
-                                                            className="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-amber-500 text-amber-300 text-[10px] font-mono font-bold rounded-md transition"
+                                                            className="min-h-[44px] px-3.5 bg-slate-900 hover:bg-slate-800 active:scale-95 border border-slate-700 hover:border-amber-500 text-amber-300 text-xs font-mono font-bold rounded-xl transition shadow-sm"
                                                         >
                                                             +5m
                                                         </button>
                                                         <button
                                                             type="button"
                                                             onClick={() => handleExtendRunningTimer(m, 10)}
-                                                            className="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-amber-500 text-amber-300 text-[10px] font-mono font-bold rounded-md transition"
+                                                            className="min-h-[44px] px-3.5 bg-slate-900 hover:bg-slate-800 active:scale-95 border border-slate-700 hover:border-amber-500 text-amber-300 text-xs font-mono font-bold rounded-xl transition shadow-sm"
                                                         >
                                                             +10m
                                                         </button>
@@ -793,28 +811,27 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                                             <button
                                                 type="button"
                                                 onClick={() => handleClearMachine(m)}
-                                                className="mt-3 w-full py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 text-xs font-bold rounded-xl flex items-center justify-center space-x-1.5 transition"
+                                                className="mt-3 w-full min-h-[48px] py-3 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 active:scale-98 text-slate-100 text-xs font-black rounded-xl flex items-center justify-center space-x-2 transition shadow-sm"
                                                 title="Unload drum and mark basket as DRY DONE"
                                             >
-                                                <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                                                <RotateCcw className="w-4 h-4 text-amber-400 stroke-[2.5]" />
                                                 <span>Clear Drum (Dry Done)</span>
                                             </button>
                                         ) : (
-                                            <div className="mt-3 space-y-2">
-                                                {/* EDITABLE DURATION CONTROLS BEFORE START */}
-                                                <div className="p-2 bg-slate-900/80 rounded-xl border border-slate-800/80 space-y-1.5">
-                                                    <div className="flex items-center justify-between text-[10px]">
-                            <span className="text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1">
-                              <Clock className="w-3 h-3 text-amber-400" />
-                              Cycle Duration:
+                                            <div className="mt-3 space-y-2.5">
+                                                <div className="p-2.5 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2">
+                                                    <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                              <Clock className="w-3.5 h-3.5 text-amber-400" />
+                              Duration:
                             </span>
                                                         <div className="flex items-center gap-1 font-mono font-bold text-amber-300">
                                                             <button
                                                                 type="button"
                                                                 onClick={() => handleModifyDuration(m.name, configuredDuration - 5)}
-                                                                className="w-5 h-5 rounded bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-300"
+                                                                className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-200 active:scale-95"
                                                             >
-                                                                <Minus className="w-2.5 h-2.5" />
+                                                                <Minus className="w-3 h-3 stroke-[3]" />
                                                             </button>
                                                             <input
                                                                 type="number"
@@ -822,28 +839,28 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                                                                 max={120}
                                                                 value={configuredDuration}
                                                                 onChange={(e) => handleModifyDuration(m.name, parseInt(e.target.value) || 45)}
-                                                                className="w-9 text-center bg-slate-950 border border-slate-700 rounded py-0.5 text-xs text-white focus:outline-none focus:border-amber-500 font-mono font-bold"
+                                                                className="w-10 text-center bg-slate-950 border border-slate-700 rounded-lg py-1 text-xs text-white focus:outline-none focus:border-amber-500 font-mono font-bold"
                                                             />
-                                                            <span className="text-[10px] text-slate-400">m</span>
+                                                            <span className="text-xs text-slate-400">m</span>
                                                             <button
                                                                 type="button"
                                                                 onClick={() => handleModifyDuration(m.name, configuredDuration + 5)}
-                                                                className="w-5 h-5 rounded bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-300"
+                                                                className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-200 active:scale-95"
                                                             >
-                                                                <Plus className="w-2.5 h-2.5" />
+                                                                <Plus className="w-3 h-3 stroke-[3]" />
                                                             </button>
                                                         </div>
                                                     </div>
 
-                                                    <div className="flex items-center gap-1 justify-between">
+                                                    <div className="grid grid-cols-3 gap-1.5">
                                                         {[30, 45, 60].map((preset) => (
                                                             <button
                                                                 key={preset}
                                                                 type="button"
                                                                 onClick={() => handleModifyDuration(m.name, preset)}
-                                                                className={`flex-1 py-0.5 rounded text-[10px] font-mono font-bold border transition ${
+                                                                className={`min-h-[38px] py-1.5 rounded-lg text-xs font-mono font-bold border transition active:scale-95 ${
                                                                     configuredDuration === preset
-                                                                        ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                                                                        ? 'bg-amber-500/25 border-amber-400 text-amber-300'
                                                                         : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
                                                                 }`}
                                                             >
@@ -853,7 +870,6 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                                                     </div>
                                                 </div>
 
-                                                {/* One-Tap Suggestion Chips */}
                                                 <div className="space-y-1">
                           <span className="text-[10px] text-amber-400 font-semibold uppercase flex items-center gap-1">
                             <Bubbles className="w-3.5 h-3.5 text-amber-400" />
@@ -866,25 +882,24 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                                                                     key={sug.id}
                                                                     type="button"
                                                                     onClick={() => handleAppointAndStart(m, sug.tag)}
-                                                                    className="px-2 py-0.5 rounded-lg border text-[10px] font-mono font-bold transition flex items-center gap-1 bg-slate-900 border-slate-700 text-amber-300 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-400 active:scale-95 shadow-sm"
+                                                                    className="px-2.5 py-1 rounded-lg border text-xs font-mono font-bold transition flex items-center gap-1 bg-slate-900 border-slate-700 text-amber-300 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-400 active:scale-95 shadow-sm"
                                                                 >
                                                                     <span>+{sug.tag}</span>
-                                                                    <span className="text-[9px] opacity-75 font-normal">({sug.source})</span>
+                                                                    <span className="text-[10px] opacity-75 font-normal">({sug.source})</span>
                                                                 </button>
                                                             ))}
                                                         </div>
                                                     ) : (
-                                                        <p className="text-[10px] text-slate-500 italic">No baskets in washing</p>
+                                                        <p className="text-[10px] text-slate-500 italic">No completed washes ready for dryer</p>
                                                     )}
                                                 </div>
 
-                                                {/* Manual Input Fallback */}
                                                 <form
                                                     onSubmit={(e) => {
                                                         e.preventDefault();
                                                         handleAppointAndStart(m, inputValue);
                                                     }}
-                                                    className="flex gap-1"
+                                                    className="flex gap-1.5"
                                                 >
                                                     <input
                                                         type="text"
@@ -896,14 +911,14 @@ export function MachineBayModal({ isOpen, onClose }: MachineBayModalProps) {
                                                                 [m.name]: e.target.value,
                                                             }))
                                                         }
-                                                        className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 font-mono uppercase"
+                                                        className="flex-1 min-h-[44px] bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 font-mono uppercase"
                                                     />
                                                     <button
                                                         type="submit"
                                                         disabled={!inputValue.trim()}
-                                                        className="px-3 py-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-xs rounded-xl flex items-center justify-center transition shadow"
+                                                        className="min-h-[44px] px-4 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 text-slate-950 font-bold text-xs rounded-xl flex items-center justify-center transition shadow active:scale-95"
                                                     >
-                                                        <Play className="w-3 h-3 fill-current" />
+                                                        <Play className="w-3.5 h-3.5 fill-current" />
                                                     </button>
                                                 </form>
                                             </div>
